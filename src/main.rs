@@ -1,13 +1,7 @@
 mod data;
 mod core;
-mod errors;
 
 use core::tensor_storage::TensorStorage;
-
-// use std::io::{self, Read};
-// use std::error::Error;
-
-// use game::types;
 
 fn main() {
     println!("Hello, world!");
