@@ -7,10 +7,10 @@ fn main() {
     println!("Hello, world!");
 
     let shape = vec![1, 2, 3];
-    let fill_value = 5.0;
 
-    let x = TensorStorage::new(shape, fill_value);
+    let a = TensorStorage::new(shape.clone(), 5.0);
+    let b = TensorStorage::new(shape.clone(), 9.0);
 
-    // println!("{}", x);
-    dbg!(x);
+    println!("{}", TensorStorage::add(&a, &b));
+    // dbg!(TensorStorage::add(&a, &b));
 }

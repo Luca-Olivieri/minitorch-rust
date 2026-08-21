@@ -1,19 +1,19 @@
-use std::panic;
 use std::fmt::self;
 
 // TODO make the numbers generic (not tied to f64)
 #[derive(Debug)]
 pub struct TensorStorage {
-    flat_data: Vec<f64>,
-    shape: Vec<usize>,
-    strides: Vec<usize>,
-    contiguous: bool,
-    numel: usize,
-    offset: usize
+    pub(super) flat_data: Vec<f64>,
+    pub shape: Vec<usize>,
+    pub(super) strides: Vec<usize>,
+    pub(super) contiguous: bool,
+    pub numel: usize,
+    pub(super) offset: usize
 }
 
 impl TensorStorage {
 
+    // TODO: might think of a constructor which does not initialize the whole flat_data, so that you can iterate through it when building a new flat_data
     pub fn new(
         shape: Vec<usize>,
         fill_value: f64
@@ -37,12 +37,32 @@ impl TensorStorage {
             offset: 0,
         }
     }
-}
 
-impl fmt::Display for TensorStorage {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", format!("{:?}", self))
+    fn is_contiguous(&self) -> bool {
+        let contiguous_strides = init_strides(&self.shape);
+
+        for i in 0..self.shape.len() {
+            if self.shape[i] == 1 { continue };
+            if self.strides[i] != contiguous_strides[i] { return false; }
+        }
+
+        true
     }
+
+    fn item(&self) -> f64 {
+        if self.numel != 1 {
+            panic!("Cannot call item() on a non-singleton tensor (shape {:?}).", self.shape)
+        }
+
+        self.flat_data[self.offset]
+    }
+
+    // float& TensorStorage::item() const {
+    //     if (m_numel != 1) {
+    //         throw std::runtime_error(std::format("Cannot call item() on a non-singleton tensor (shape {}).", m_shape));
+    //     }
+    //     return (*m_flat_data)[m_offset];
+    // }
 }
 
 fn are_dims_positive(shape: &Vec<usize>) -> bool {
