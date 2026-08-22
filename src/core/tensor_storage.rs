@@ -18,8 +18,6 @@ impl TensorStorage {
         shape: Vec<usize>,
         fill_value: f64
     ) -> Self {
-        // assert_positive_dims(shape);;
-        //
 
         if !are_dims_positive(&shape) {
             panic!("Tensor shape must have positive dimensions. Got {shape:?}.")
@@ -56,25 +54,10 @@ impl TensorStorage {
 
         self.flat_data[self.offset]
     }
-
-    // float& TensorStorage::item() const {
-    //     if (m_numel != 1) {
-    //         throw std::runtime_error(std::format("Cannot call item() on a non-singleton tensor (shape {}).", m_shape));
-    //     }
-    //     return (*m_flat_data)[m_offset];
-    // }
 }
 
 fn are_dims_positive(shape: &Vec<usize>) -> bool {
-    // shape.iter().all(|&dim| dim != 0)
-
-    for dim in shape {
-        if *dim == 0 {
-            return false
-        }
-    }
-
-    true
+    shape.iter().all(|&dim| dim != 0)
 }
 
 fn compute_numel_from_shape(shape: &Vec<usize>) -> usize {
