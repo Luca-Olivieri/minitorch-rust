@@ -1,3 +1,5 @@
+mod indexing;
+
 use std::rc::Rc;
 use std::ops::{Add, Sub, Mul, Div};
 
@@ -19,6 +21,10 @@ impl Tensor {
         let node = TensorNode::new(shape, fill_value, requires_grad);
 
         Self { node: Rc::new(node) }
+    }
+
+    pub fn shape(&self) -> &Vec<usize> {
+        &self.node.storage.shape
     }
 }
 

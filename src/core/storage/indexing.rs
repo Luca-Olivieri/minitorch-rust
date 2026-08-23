@@ -68,16 +68,43 @@ impl TensorStorage {
     }
 }
 
+impl Index<&Vec<usize>> for TensorStorage {
+    type Output = f64;
+
+    fn index(
+        &self,
+        md_idx: &Vec<usize>
+    ) -> &f64 {
+        &self.flat_data[self.md_to_flat(md_idx)]
+    }
+}
+
 impl Index<usize> for TensorStorage {
     type Output = f64;
 
-    fn index(&self, i: usize) -> &f64 {
+    fn index(
+        &self,
+        i: usize
+    ) -> &f64 {
         &self.flat_data[self.logic_to_flat(i)]
     }
 }
 
+impl IndexMut<&Vec<usize>> for TensorStorage {
+    fn index_mut(
+        &mut self,
+        md_idx: &Vec<usize>
+    ) -> &mut f64 {
+        let f_idx = self.md_to_flat(md_idx);
+        &mut self.flat_data[f_idx]
+    }
+}
+
 impl IndexMut<usize> for TensorStorage {
-    fn index_mut(&mut self, i: usize) -> &mut f64 {
+    fn index_mut(
+        &mut self,
+        i: usize
+    ) -> &mut f64 {
         let f_idx = self.logic_to_flat(i);
         &mut self.flat_data[f_idx]
     }

@@ -22,8 +22,11 @@ fn main() {
     // println!("{}", TensorStorage::log(&a, &b));
     // dbg!(TensorStorage::add(&a, &b));
 
+    let md_idx: Vec<usize> = vec![0, 1, 2];
+
     let a = Tensor::new(shape.clone(), 5.1, true);
     let b = Tensor::new(shape.clone(), 9.2, true);
+
 
     let c = &a + &b;
     let d = &a - &b;
