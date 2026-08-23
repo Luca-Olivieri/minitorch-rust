@@ -6,12 +6,54 @@ use std::ops::{Add, Sub, Mul, Div};
 use crate::core::node::TensorNode;
 use crate::core::storage::TensorStorage;
 
+pub trait Tensor {
+
+    fn get_node(&self) -> &TensorNode; // TODO return a reference, or some sort of weak pointer?
+
+    fn at(&self, md_idx: &Vec<usize>) -> &f64 {
+        &self.get_node().storage[md_idx]
+    }
+
+    fn shape(&self) -> &Vec<usize> {
+        &self.get_node().storage.shape
+    }
+
+    fn numel(&self) -> usize {
+        self.get_node().storage.numel
+    }
+}
+
 #[derive(Debug)]
-pub struct Tensor {
+pub struct FreeTensor { // TODO find a definitive name
+    node: Box<TensorNode>,
+}
+
+impl Tensor for FreeTensor {
+
+    fn get_node(&self) -> &TensorNode {
+        &self.node
+    }
+}
+
+impl FreeTensor {
+
+    pub fn new(
+        shape: Vec<usize>,
+        fill_value: f64,
+        requires_grad: bool
+    ) -> Self {
+        let node = TensorNode::new(shape, fill_value, requires_grad);
+
+        Self { node: Box::new(node) }
+    }
+}
+
+#[derive(Debug)]
+pub struct GraphTensor {
     node: Rc<TensorNode>,
 }
 
-impl Tensor {
+impl GraphTensor { // turn this impl and the above one in a macro
 
     pub fn new(
         shape: Vec<usize>,
@@ -23,8 +65,8 @@ impl Tensor {
         Self { node: Rc::new(node) }
     }
 
-    pub fn shape(&self) -> &Vec<usize> {
-        &self.node.storage.shape
+    fn get_node(&self) -> &TensorNode {
+        &self.node
     }
 }
 
@@ -38,9 +80,9 @@ macro_rules! impl_tensor_binary_ops {
 
 macro_rules! impl_tensor_binary_op {
     ($trait:ident, $method:ident, $storage_fn:path) => {
-        impl $trait for &Tensor {
-            type Output = Tensor;
-            fn $method(self, other: &Tensor) -> Tensor {
+        impl $trait for &GraphTensor {
+            type Output = GraphTensor;
+            fn $method(self, other: &GraphTensor) -> GraphTensor {
                 apply_tensor_op($storage_fn, &[self, other])
             }
         }
@@ -56,8 +98,8 @@ impl_tensor_binary_ops! {
 
 fn apply_tensor_op<F, const N: usize>(
     op: F,
-    operands: &[&Tensor; N]
-) -> Tensor
+    operands: &[&GraphTensor; N]
+) -> GraphTensor
     where
         F: Fn(&[&TensorStorage; N]) -> TensorStorage,
 {
@@ -76,9 +118,9 @@ fn apply_tensor_op<F, const N: usize>(
         requires_grad: extract_requires_grad(operands)
     };
 
-    Tensor { node: Rc::new(out_node) }
+    GraphTensor { node: Rc::new(out_node) }
 }
 
-fn extract_requires_grad(operands: &[&Tensor]) -> bool {
+fn extract_requires_grad(operands: &[&GraphTensor]) -> bool {
     operands.iter().any(|t| t.node.requires_grad)
 }

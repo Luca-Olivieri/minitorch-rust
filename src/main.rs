@@ -1,7 +1,9 @@
 mod core;
 mod data;
 
-use core::Tensor;
+use core::GraphTensor;
+
+use crate::core::tensor::{FreeTensor, Tensor};
 
 fn main() {
     println!("Hello, world!");
@@ -24,13 +26,21 @@ fn main() {
 
     let md_idx: Vec<usize> = vec![0, 1, 2];
 
-    let a = Tensor::new(shape.clone(), 5.1, true);
-    let b = Tensor::new(shape.clone(), 9.2, true);
+    let mut f = FreeTensor::new(shape.clone(), 10.0, true);
+
+    let md_idx = vec![0, 1, 2];
+
+    dbg!(f.at(&md_idx));
+    f.set(&md_idx, 3.0);
+    dbg!(f.at(&md_idx));
+
+    let a = GraphTensor::new(shape.clone(), 5.1, true);
+    let b = GraphTensor::new(shape.clone(), 9.2, true);
 
 
     let c = &a + &b;
     let d = &a - &b;
 
-    dbg!(c);
-    dbg!(d);
+    // dbg!(c);
+    // dbg!(d);
 }
