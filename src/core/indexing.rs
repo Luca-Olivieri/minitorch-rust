@@ -57,10 +57,10 @@ impl TensorStorage {
 
         let mut curr_idx = l_idx;
 
-        let mut md = vec![0; self.shape.len()];
+        let mut md = Vec::with_capacity(self.shape.len());
 
         for i in (0..self.shape.len()).rev() {
-            md[i] = curr_idx % self.shape[i];
+            md.push(curr_idx % self.shape[i]);
             curr_idx /= self.shape[i];
         }
 

@@ -1,5 +1,3 @@
-use std::fmt::self;
-
 // TODO make the numbers generic (not tied to f64)
 #[derive(Debug)]
 pub struct TensorStorage {
@@ -69,10 +67,10 @@ fn compute_numel_from_shape(shape: &Vec<usize>) -> usize {
 }
 
 fn init_strides(shape: &Vec<usize>) -> Vec<usize> {
-    let mut strides = vec!(0; shape.len());
+    let mut strides = Vec::with_capacity(shape.len());
     let mut curr_stride: usize = 1;
     for i in (0..shape.len()).rev() {
-        strides[i] = curr_stride;
+        strides.push(curr_stride);
         curr_stride *= shape[i];
     }
 

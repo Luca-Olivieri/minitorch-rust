@@ -5,7 +5,7 @@ pub fn apply_op<F, const N: usize>(
     op: F
 ) -> TensorStorage
 where
-    F: Fn([f64; N]) -> f64,
+    F: Fn([f64; N]) -> f64, // TODO should I pass this slice as a reference?
 {
     let first = operands[0];
     let mut out = TensorStorage::new(first.shape.clone(), 0.0);
