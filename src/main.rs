@@ -1,8 +1,7 @@
-mod data;
 mod core;
+mod data;
 
-use core::tensor_storage::TensorStorage;
-use core::tensor::Tensor;
+use core::Tensor;
 
 fn main() {
     println!("Hello, world!");

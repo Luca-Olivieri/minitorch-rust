@@ -1,4 +1,4 @@
-use crate::core::tensor_storage::TensorStorage;
+use crate::core::storage::TensorStorage;
 use super::utils::apply_op;
 
 impl TensorStorage {

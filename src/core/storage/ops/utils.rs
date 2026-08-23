@@ -1,4 +1,4 @@
-use crate::core::tensor_storage::TensorStorage;
+use crate::core::storage::TensorStorage;
 
 pub fn apply_op<F, const N: usize>(
     operands: &[&TensorStorage; N],

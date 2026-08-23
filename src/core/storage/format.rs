@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::core::tensor_storage::TensorStorage;
+use crate::core::storage::TensorStorage;
 
 // TODO implementing fmt::Display for TensorStorage is very convenient to print it easily, but in practice you should only dbg!, since TensorStorage is not meant to be exposed to the user
 

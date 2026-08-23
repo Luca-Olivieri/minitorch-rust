@@ -1,3 +1,7 @@
+pub mod indexing;
+pub mod ops;
+pub mod format;
+
 // TODO make the numbers generic (not tied to f64)
 #[derive(Debug)]
 pub struct TensorStorage {

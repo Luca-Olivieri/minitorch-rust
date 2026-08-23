@@ -1,4 +1,4 @@
-use crate::core::tensor_storage::TensorStorage;
+use crate::core::storage::TensorStorage;
 use std::ops::{Index, IndexMut};
 
 impl TensorStorage {

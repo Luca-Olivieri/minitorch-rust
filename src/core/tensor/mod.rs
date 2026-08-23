@@ -1,7 +1,8 @@
 use std::rc::Rc;
 use std::ops::{Add, Sub, Mul, Div};
 
-use crate::core::{tensor_node::TensorNode, tensor_storage::TensorStorage};
+use crate::core::node::TensorNode;
+use crate::core::storage::TensorStorage;
 
 #[derive(Debug)]
 pub struct Tensor {
@@ -24,13 +25,19 @@ impl Tensor {
 macro_rules! impl_tensor_binary_ops {
     ($($trait:ident, $method:ident, $storage_fn:path);* $(;)?) => {
         $(
-            impl $trait for &Tensor {
-                type Output = Tensor;
-                fn $method(self, other: &Tensor) -> Tensor {
-                    apply_tensor_op($storage_fn, &[self, other])
-                }
-            }
+            impl_tensor_binary_op!($trait, $method, $storage_fn);
         )*
+    };
+}
+
+macro_rules! impl_tensor_binary_op {
+    ($trait:ident, $method:ident, $storage_fn:path) => {
+        impl $trait for &Tensor {
+            type Output = Tensor;
+            fn $method(self, other: &Tensor) -> Tensor {
+                apply_tensor_op($storage_fn, &[self, other])
+            }
+        }
     };
 }
 
