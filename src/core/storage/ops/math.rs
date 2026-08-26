@@ -31,7 +31,7 @@ impl TensorStorage {
         div,     (a, b), a / b;
         modul,   (a, b), a % b;
         pow,     (b, e), b.powf(e);
-        log,     (a, b), a.log(b);
+        ln,     (a), a.ln();
         maximum, (a, b), if a > b { a } else { b };
     }
 }

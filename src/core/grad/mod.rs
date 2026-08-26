@@ -90,6 +90,11 @@ fn compute_in_degree(seed: GraphTensor) -> HashMap<TensorKey, u64> { // TODO sho
 
     while let Some(u) = bfs_queue.pop_front() {
 
+        // Fix: Do not propagate through nodes that do not require gradients.
+        if !u.node.requires_grad {
+            continue;
+        }
+
         if let Some(grad_fn) = &u.node.grad_fn {
             let operands = grad_fn.get_operands();
 
@@ -115,13 +120,22 @@ fn topological_backprop(
 
     let mut grads_map: HashMap<TensorKey, GraphTensor> = HashMap::new();
 
-    let seed_grad = GraphTensor::new(seed.shape().clone(), 1.0, false); // TODO change requires_grad for higher order derivates
+    // NOTE: if 'retain_graph' = True, the gradient tensors have 'requires_grad = True'
+    //       otherwise, you cannot compute higher-order derivatives
+
+    let seed_grad = GraphTensor::new(seed.shape().clone(), 1.0, retain_graph); // TODO change requires_grad for higher order derivates
     grads_map.insert(seed.to_key(), seed_grad.copy_s());
 
     let mut process_queue: VecDeque<TensorKey> = VecDeque::new();
     process_queue.push_back(seed.to_key());
 
     while let Some(u) = process_queue.pop_front() {
+
+        // Fix: Skip nodes that do not require gradients
+        if !u.node.requires_grad {
+            continue;
+        }
+
         if let Some(grad_fn) = &u.node.grad_fn {
             let in_grad = grads_map.get(&u).unwrap();
             let ops_grad = grad_fn.compute_operands_grad(in_grad);
@@ -130,21 +144,23 @@ fn topological_backprop(
 
                 if let Some(op_grad) = op_grad_opt {
                     if grads_map.contains_key(&op.to_key()) {
+                        // This unwrap is 100% safe because 'u' requires grad and was reached.
                         let a = grads_map.get(&op.to_key()).unwrap();
                         grads_map.insert(op.to_key(), a + op_grad);
                     } else {
-                        let zeros = GraphTensor::new(u.node.storage.shape.clone(), 0.0, false);
-                        grads_map.insert(op.to_key(), op_grad + &zeros);
+                        // let zeros = GraphTensor::new(u.node.storage.shape.clone(), 0.0, false);
+                        // grads_map.insert(op.to_key(), op_grad + &zeros);
+                        grads_map.insert(op.to_key(), op_grad.copy_s());
                     }
                 }
 
-                match in_degree.get_mut(&op.to_key()) {
-                    Some(in_d) => {*in_d -= 1;}
-                    None => {panic!("AAAAAA")} // TODO find out what happens here
-                }
-
-                if in_degree.get(&op.to_key()).unwrap() == &0u64 {
-                    process_queue.push_back(op.to_key());
+                // We must still decrement the in-degree of operands (even if they don't require grad)
+                // because we incremented them in compute_in_degree.
+                if let Some(in_d) = in_degree.get_mut(&op.to_key()) {
+                    *in_d -= 1;
+                    if *in_d == 0 {
+                        process_queue.push_back(op.to_key());
+                    }
                 }
             }
 

@@ -1,16 +1,18 @@
 mod indexing;
 
 use std::rc::Rc;
-use std::ops::{Add, Neg, Sub, Mul, Div};
+use std::ops::{
+    Add,
+    Neg,
+    Sub,
+    Mul,
+    Div,
+};
 
 use crate::core::node::TensorNode;
 use crate::core::storage::TensorStorage;
 use crate::core::grad::grad_fn::{
-    GradFnTrait,
-    BackwardAdd,
-    BackwardNeg,
-    BackwardSub,
-    BackwardMul
+    BackwardAdd, BackwardDiv, BackwardLn, BackwardMul, BackwardNeg, BackwardPow, BackwardSub, GradFnTrait
 };
 
 #[derive(Debug)]
@@ -145,8 +147,33 @@ impl_tensor_binary_ops! {
     Add, add, TensorStorage::add,  BackwardAdd;
     Sub, sub, TensorStorage::sub,  BackwardSub;
     Mul, mul, TensorStorage::mul,  BackwardMul;
-    // Div, div, TensorStorage::div,  BackwardDiv;
+    Div, div, TensorStorage::div,  BackwardDiv;
 }
+
+impl GraphTensor {
+    pub fn pow(&self, other: &GraphTensor) -> GraphTensor {
+        apply_tensor_op(
+            |ops: &[&TensorStorage; 2]| TensorStorage::pow(&[ops[0], ops[1]]),
+            |operands: [GraphTensor; 2]| {
+                Box::new(BackwardPow { operands, _marker: std::marker::PhantomData}) as Box<dyn GradFnTrait>
+            },
+            &[self, other],
+        )
+    }
+}
+
+impl GraphTensor {
+    pub fn ln(&self) -> GraphTensor {
+        apply_tensor_op(
+            |ops: &[&TensorStorage; 1]| TensorStorage::ln(&[ops[0]]),
+            |operands: [GraphTensor; 1]| {
+                Box::new(BackwardLn { operands, _marker: std::marker::PhantomData}) as Box<dyn GradFnTrait>
+            },
+            &[self],
+        )
+    }
+}
+
 impl_tensor_unary_ops! {
     Neg, neg, TensorStorage::neg, BackwardNeg;
 }
