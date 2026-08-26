@@ -1,7 +1,6 @@
-use crate::core::tensor::{FreeTensor};
+use crate::core::tensor::FreeTensor;
 
 // TODO use at and at_mut syntax  also in TensorStorage
-//
 
 impl FreeTensor {
 

@@ -1,11 +1,11 @@
 use crate::core::storage::TensorStorage;
+use crate::core::grad::grad_fn::GradFnTrait;
 
 #[derive(Debug)]
 pub struct TensorNode {
     pub(crate) storage: TensorStorage,
-//     std::unique_ptr<GradFn> m_grad_fn { nullptr };
-//     std::shared_ptr<Tensor> m_grad { nullptr };
-    pub(crate) requires_grad: bool
+    pub(crate) requires_grad: bool,
+    pub(super) grad_fn: Option<Box<dyn GradFnTrait>>
 }
 
 impl TensorNode {
@@ -18,9 +18,8 @@ impl TensorNode {
 
         Self {
             storage: TensorStorage::new(shape, fill_value),
-        //     m_grad_fn{ nullptr },
-        //     m_grad{ nullptr },
-            requires_grad
+            requires_grad,
+            grad_fn: None
         }
     }
 }

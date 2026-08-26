@@ -3,7 +3,8 @@ mod data;
 
 use core::GraphTensor;
 
-use crate::core::tensor::{FreeTensor, Tensor};
+use crate::core::tensor::{FreeTensor, AbstractTensor};
+use crate::core::grad::TensorKey;
 
 fn main() {
     println!("Hello, world!");
@@ -37,10 +38,13 @@ fn main() {
     let a = GraphTensor::new(shape.clone(), 5.1, true);
     let b = GraphTensor::new(shape.clone(), 9.2, true);
 
-
     let c = &a + &b;
-    let d = &a - &b;
+    let d = &c + &a;
 
-    // dbg!(c);
-    // dbg!(d);
+    let grads_map = d.backward(false);
+
+    let grad = grads_map.get(&a.to_key()).unwrap();
+
+    dbg!(&grad.get_node().storage);
+
 }

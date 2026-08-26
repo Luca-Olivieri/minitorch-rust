@@ -1,0 +1,159 @@
+pub mod grad_fn;
+
+use std::collections::{HashMap, VecDeque, HashSet};
+use std::hash::{Hash, Hasher};
+use std::rc::Rc;
+
+use crate::core::GraphTensor;
+use crate::core::node::TensorNode;
+use crate::core::tensor::AbstractTensor;
+
+pub struct TensorKey {
+    node: Rc<TensorNode> // TODO or use GraphTensor directly
+}
+
+impl TensorKey {
+    fn get_node(&self) -> &TensorNode {
+        &self.node.as_ref()
+    }
+}
+
+impl Clone for TensorKey {
+    fn clone(&self) -> Self {
+        TensorKey{node: Rc::clone(&self.node)}
+    }
+}
+
+impl PartialEq for TensorKey {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::as_ptr(&self.node) == Rc::as_ptr(&other.node)
+    }
+}
+
+impl Eq for TensorKey {}
+
+impl Hash for TensorKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        Rc::as_ptr(&self.node).hash(state);
+    }
+}
+
+impl GraphTensor {
+
+    pub fn to_key(&self) -> TensorKey {
+
+        TensorKey { node: Rc::clone(&self.node) }
+    }
+}
+
+impl GraphTensor {
+    pub fn backward(
+        &self,
+        retain_graph: bool
+    ) -> HashMap<TensorKey, GraphTensor> {
+        if !self.requires_grad() {
+            panic!("Cannot call backward() on tensor with requires_grad=False. Likely, the graph has no leaf nodes requiring gradients.")
+        }
+
+        let in_degree = compute_in_degree(self.copy_s());
+
+        let grads_map = topological_backprop(self.copy_s(), in_degree, retain_graph);
+        grads_map
+
+        // for graph_t in topo_sort_reverse(output) {
+        //     let key = Rc::as_ptr(&graph_t.node);
+        //     let Some(grad_out) = grads.get(&key).clone() else { continue };
+
+        //     let inputs = graph_t.node.op.inputs();          // parent Tensors
+        //     let input_grads = graph_t.node.op.vjp(&grad_out);
+
+        //     for (input, g) in inputs.iter().zip(input_grads) {
+        //         let ikey = Rc::as_ptr(&input.node);
+        //         grads.entry(ikey)
+        //             // .and_modify(|acc| *acc = Tensor::add(acc, &g)) // tracked op!
+        //             .and_modify(|acc| *acc = &*acc + &g) // tracked op!
+        //             .or_insert(g);
+        //     }
+        // }
+    }
+}
+
+fn compute_in_degree(seed: GraphTensor) -> HashMap<TensorKey, u64> { // TODO should seed be owned?
+    let mut in_degree: HashMap<TensorKey, u64> = HashMap::new();
+    let mut bfs_queue: VecDeque<TensorKey> = VecDeque::new();
+    let mut visited: HashSet<TensorKey> = HashSet::new();
+
+    // TODO should all this methods create owning TensorKey?
+
+    let seed_key = seed.to_key();
+    bfs_queue.push_back(seed_key.clone()); // TODO I can use the into() or cast() method for automatic conversion to TensorKey
+    visited.insert(seed_key.clone());
+    in_degree.insert(seed_key.clone(), 0);
+
+    while let Some(u) = bfs_queue.pop_front() {
+
+        if let Some(grad_fn) = &u.node.grad_fn {
+            let operands = grad_fn.get_operands();
+
+            for op in operands {
+                let op_key = op.to_key();
+                *in_degree.entry(op_key.clone()).or_insert(0) += 1;
+                if visited.insert(op_key.clone()) {
+                    bfs_queue.push_back(op_key.clone());
+                }
+            }
+        }
+    }
+
+    in_degree
+}
+
+fn topological_backprop(
+    seed: GraphTensor, // TODO should seed be owned?
+    mut in_degree: HashMap<TensorKey, u64>,
+    retain_graph: bool
+) -> HashMap<TensorKey, GraphTensor> {
+    let mut grads_map: HashMap<TensorKey, GraphTensor> = HashMap::new();
+
+    let seed_grad = GraphTensor::new(seed.shape().clone(), 1.0, false); // TODO change requires_grad for higher order derivates
+    grads_map.insert(seed.to_key(), seed_grad.copy_s());
+
+    let mut process_queue: VecDeque<TensorKey> = VecDeque::new();
+    process_queue.push_back(seed.to_key());
+
+    while let Some(u) = process_queue.pop_front() {
+        if let Some(grad_fn) = &u.node.grad_fn {
+            let in_grad = grads_map.get(&u).unwrap();
+            let ops_grad = grad_fn.compute_operands_grad(in_grad);
+
+            for (op, op_grad_opt) in grad_fn.get_operands().iter().zip(ops_grad.iter()) {
+
+                if let Some(op_grad) = op_grad_opt {
+                    if grads_map.contains_key(&op.to_key()) {
+                        let a = grads_map.get(&op.to_key()).unwrap();
+                        grads_map.insert(op.to_key(), a + op_grad);
+                    } else {
+                        let zeros = GraphTensor::new(u.node.storage.shape.clone(), 0.0, false);
+                        grads_map.insert(op.to_key(), op_grad + &zeros);
+                    }
+                }
+
+                match in_degree.get_mut(&op.to_key()) {
+                    Some(in_d) => {*in_d -= 1;}
+                    None => {panic!("AAAAAA")} // TODO find out what happens here
+                }
+
+                if in_degree.get(&op.to_key()).unwrap() == &0u64 {
+                    process_queue.push_back(op.to_key());
+                }
+            }
+
+            // NOTE: cannot execute the free, because grad_fn are inside a mutable Rc, but the Rc should free it when possible
+            // if !retain_graph {
+            //     u.node.grad_fn = None
+            // }
+        }
+    }
+
+    grads_map
+}

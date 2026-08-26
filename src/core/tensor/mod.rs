@@ -5,8 +5,14 @@ use std::ops::{Add, Sub, Mul, Div};
 
 use crate::core::node::TensorNode;
 use crate::core::storage::TensorStorage;
+use crate::core::grad::grad_fn::{BackwardAdd, GradFnTrait};
 
-pub trait Tensor {
+#[derive(Debug)]
+pub struct Tensor<'a> {
+    g_tensor: &'a GraphTensor,
+}
+
+pub trait AbstractTensor {
 
     fn get_node(&self) -> &TensorNode; // TODO return a reference, or some sort of weak pointer?
 
@@ -21,6 +27,10 @@ pub trait Tensor {
     fn numel(&self) -> usize {
         self.get_node().storage.numel
     }
+
+    fn requires_grad(&self) -> bool {
+        self.get_node().requires_grad
+    }
 }
 
 #[derive(Debug)]
@@ -28,10 +38,10 @@ pub struct FreeTensor { // TODO find a definitive name
     node: Box<TensorNode>,
 }
 
-impl Tensor for FreeTensor {
+impl AbstractTensor for FreeTensor {
 
     fn get_node(&self) -> &TensorNode {
-        &self.node
+        &self.node.as_ref()
     }
 }
 
@@ -50,7 +60,7 @@ impl FreeTensor {
 
 #[derive(Debug)]
 pub struct GraphTensor {
-    node: Rc<TensorNode>,
+    pub(super) node: Rc<TensorNode>
 }
 
 impl GraphTensor { // turn this impl and the above one in a macro
@@ -65,8 +75,15 @@ impl GraphTensor { // turn this impl and the above one in a macro
         Self { node: Rc::new(node) }
     }
 
+    pub fn copy_s(&self) -> GraphTensor {
+        Self { node: self.node.clone()}
+    }
+}
+
+impl AbstractTensor for GraphTensor {
+
     fn get_node(&self) -> &TensorNode {
-        &self.node
+        &self.node.as_ref()
     }
 }
 
@@ -103,24 +120,32 @@ fn apply_tensor_op<F, const N: usize>(
     where
         F: Fn(&[&TensorStorage; N]) -> TensorStorage,
 {
-    let first_operand_shape = &operands[0].node.storage.shape;
+    let first_operand_shape = &operands[0].get_node().storage.shape;
 
     for o in operands {
-        assert_eq!(first_operand_shape, &o.node.storage.shape);
+        assert_eq!(first_operand_shape, &o.get_node().storage.shape);
     }
 
-    let storages: [&TensorStorage; N] = std::array::from_fn(|i| &operands[i].node.storage);
+    let storages: [&TensorStorage; N] = std::array::from_fn(|i| &operands[i].get_node().storage);
 
     let out_store = op(&storages);
 
+    // TODO BackwardAdd (with N=2) is hard-coded
+
+    let new_operands: [GraphTensor; 2] = std::array::from_fn(|i| operands[i].copy_s());
+
+    let b: Box<dyn GradFnTrait> = Box::new( BackwardAdd{operands: new_operands} );
+    let c = Option::from(b);
+
     let out_node = TensorNode {
         storage: out_store,
-        requires_grad: extract_requires_grad(operands)
+        requires_grad: extract_requires_grad(operands),
+        grad_fn: c
     };
 
     GraphTensor { node: Rc::new(out_node) }
 }
 
 fn extract_requires_grad(operands: &[&GraphTensor]) -> bool {
-    operands.iter().any(|t| t.node.requires_grad)
+    operands.iter().any(|t| t.get_node().requires_grad)
 }
