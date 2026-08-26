@@ -55,9 +55,7 @@ impl GraphTensor {
             panic!("Cannot call backward() on tensor with requires_grad=False. Likely, the graph has no leaf nodes requiring gradients.")
         }
 
-        let in_degree = compute_in_degree(self.copy_s());
-
-        let grads_map = topological_backprop(self.copy_s(), in_degree, retain_graph);
+        let grads_map = topological_backprop(self.copy_s(), retain_graph);
         grads_map
 
         // for graph_t in topo_sort_reverse(output) {
@@ -110,9 +108,11 @@ fn compute_in_degree(seed: GraphTensor) -> HashMap<TensorKey, u64> { // TODO sho
 
 fn topological_backprop(
     seed: GraphTensor, // TODO should seed be owned?
-    mut in_degree: HashMap<TensorKey, u64>,
     retain_graph: bool
 ) -> HashMap<TensorKey, GraphTensor> {
+
+    let mut in_degree = compute_in_degree(seed.copy_s());
+
     let mut grads_map: HashMap<TensorKey, GraphTensor> = HashMap::new();
 
     let seed_grad = GraphTensor::new(seed.shape().clone(), 1.0, false); // TODO change requires_grad for higher order derivates

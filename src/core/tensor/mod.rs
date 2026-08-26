@@ -1,11 +1,17 @@
 mod indexing;
 
 use std::rc::Rc;
-use std::ops::{Add, Sub, Mul, Div};
+use std::ops::{Add, Neg, Sub, Mul, Div};
 
 use crate::core::node::TensorNode;
 use crate::core::storage::TensorStorage;
-use crate::core::grad::grad_fn::{BackwardAdd, GradFnTrait};
+use crate::core::grad::grad_fn::{
+    GradFnTrait,
+    BackwardAdd,
+    BackwardNeg,
+    BackwardSub,
+    BackwardMul
+};
 
 #[derive(Debug)]
 pub struct Tensor<'a> {
@@ -88,59 +94,87 @@ impl AbstractTensor for GraphTensor {
 }
 
 macro_rules! impl_tensor_binary_ops {
-    ($($trait:ident, $method:ident, $storage_fn:path);* $(;)?) => {
+    ($($trait:ident, $method:ident, $storage_fn:path, $grad_fn:ident);* $(;)?) => {
         $(
-            impl_tensor_binary_op!($trait, $method, $storage_fn);
+            impl_tensor_binary_op!($trait, $method, $storage_fn, $grad_fn);
         )*
     };
 }
-
 macro_rules! impl_tensor_binary_op {
-    ($trait:ident, $method:ident, $storage_fn:path) => {
+    ($trait:ident, $method:ident, $storage_fn:path, $grad_fn:ident) => {
         impl $trait for &GraphTensor {
             type Output = GraphTensor;
             fn $method(self, other: &GraphTensor) -> GraphTensor {
-                apply_tensor_op($storage_fn, &[self, other])
+                apply_tensor_op(
+                    |ops: &[&TensorStorage; 2]| $storage_fn(&[ops[0], ops[1]]),
+                    |operands: [GraphTensor; 2]| {
+                        Box::new($grad_fn { operands, _marker: std::marker::PhantomData}) as Box<dyn GradFnTrait>
+                    },
+                    &[self, other],
+                )
+            }
+        }
+    };
+}
+
+macro_rules! impl_tensor_unary_ops {
+    ($($trait:ident, $method:ident, $storage_fn:path, $grad_fn:ident);* $(;)?) => {
+        $(
+            impl_tensor_unary_op!($trait, $method, $storage_fn, $grad_fn);
+        )*
+    };
+}
+macro_rules! impl_tensor_unary_op {
+    ($trait:ident, $method:ident, $storage_fn:path, $grad_fn:ident) => {
+        impl $trait for &GraphTensor {
+            type Output = GraphTensor;
+            fn $method(self) -> GraphTensor {
+                apply_tensor_op(
+                    |ops: &[&TensorStorage; 1]| $storage_fn(&[ops[0]]),
+                    |operands: [GraphTensor; 1]| {
+                        Box::new($grad_fn { operands, _marker: std::marker::PhantomData }) as Box<dyn GradFnTrait>
+                    },
+                    &[self],
+                )
             }
         }
     };
 }
 
 impl_tensor_binary_ops! {
-    Add, add, TensorStorage::add;
-    Sub, sub, TensorStorage::sub;
-    Mul, mul, TensorStorage::mult;
-    Div, div, TensorStorage::div;
+    Add, add, TensorStorage::add,  BackwardAdd;
+    Sub, sub, TensorStorage::sub,  BackwardSub;
+    Mul, mul, TensorStorage::mul,  BackwardMul;
+    // Div, div, TensorStorage::div,  BackwardDiv;
+}
+impl_tensor_unary_ops! {
+    Neg, neg, TensorStorage::neg, BackwardNeg;
 }
 
-fn apply_tensor_op<F, const N: usize>(
+fn apply_tensor_op<F, G, const N: usize>(
     op: F,
-    operands: &[&GraphTensor; N]
+    grad_fn: G,
+    operands: &[&GraphTensor; N],
 ) -> GraphTensor
-    where
-        F: Fn(&[&TensorStorage; N]) -> TensorStorage,
+where
+    F: Fn(&[&TensorStorage; N]) -> TensorStorage,
+    G: FnOnce([GraphTensor; N]) -> Box<dyn GradFnTrait>,
 {
     let first_operand_shape = &operands[0].get_node().storage.shape;
-
     for o in operands {
         assert_eq!(first_operand_shape, &o.get_node().storage.shape);
     }
 
     let storages: [&TensorStorage; N] = std::array::from_fn(|i| &operands[i].get_node().storage);
-
     let out_store = op(&storages);
 
-    // TODO BackwardAdd (with N=2) is hard-coded
-
-    let new_operands: [GraphTensor; 2] = std::array::from_fn(|i| operands[i].copy_s());
-
-    let b: Box<dyn GradFnTrait> = Box::new( BackwardAdd{operands: new_operands} );
-    let c = Option::from(b);
+    let new_operands: [GraphTensor; N] = std::array::from_fn(|i| operands[i].copy_s());
+    let grad_fn_box: Box<dyn GradFnTrait> = grad_fn(new_operands);
 
     let out_node = TensorNode {
         storage: out_store,
         requires_grad: extract_requires_grad(operands),
-        grad_fn: c
+        grad_fn: Some(grad_fn_box),
     };
 
     GraphTensor { node: Rc::new(out_node) }

@@ -39,7 +39,7 @@ fn main() {
     let b = GraphTensor::new(shape.clone(), 9.2, true);
 
     let c = &a + &b;
-    let d = &c + &a;
+    let d = &c - &a;
 
     let grads_map = d.backward(false);
 

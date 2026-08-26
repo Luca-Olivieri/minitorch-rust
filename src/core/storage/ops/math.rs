@@ -25,9 +25,9 @@ macro_rules! impl_storage_elemwise_op {
 impl TensorStorage {
     impl_storage_elemwise_ops!{
         add,     (a, b), a + b;
-        minus,   (a),    -a;
+        neg,     (a), -a;
         sub,     (a, b), a - b;
-        mult,    (a, b), a * b;
+        mul,    (a, b), a * b;
         div,     (a, b), a / b;
         modul,   (a, b), a % b;
         pow,     (b, e), b.powf(e);
