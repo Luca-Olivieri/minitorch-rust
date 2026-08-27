@@ -1,0 +1,71 @@
+use std::rc::Rc;
+use std::ops::{
+    Add,
+    Neg,
+    Sub,
+    Mul,
+    Div,
+};
+
+use crate::core::tensor::GraphTensor;
+use crate::core::node::TensorNode;
+use crate::core::storage::TensorStorage;
+use crate::core::autograd::grad_fn::GradFnTrait;
+use crate::core::tensor::extract_requires_grad;
+use crate::core::autograd::ops::{
+    BackwardAdd,
+    BackwardDiv,
+    BackwardLn,
+    BackwardMul,
+    BackwardNeg,
+    BackwardPow,
+    BackwardSub
+};
+
+impl GraphTensor {
+    impl_tensor_unary_op!(ln, TensorStorage::ln, BackwardLn);
+
+    impl_tensor_binary_op!(pow, TensorStorage::pow, BackwardPow);
+
+    // impl_tensor_unary_op!(sum, TensorStorage::sum, BackwardLn); // Use the ctual
+}
+
+impl_tensor_binary_ops! {
+    Add, add, TensorStorage::add,  BackwardAdd;
+    Sub, sub, TensorStorage::sub,  BackwardSub;
+    Mul, mul, TensorStorage::mul,  BackwardMul;
+    Div, div, TensorStorage::div,  BackwardDiv;
+}
+
+impl_tensor_unary_ops! {
+    Neg, neg, TensorStorage::neg, BackwardNeg;
+}
+
+pub fn apply_tensor_op<F, G, const N: usize>(
+    op: F,
+    grad_fn: G,
+    operands: &[&GraphTensor; N],
+) -> GraphTensor
+where
+    F: Fn(&[&TensorStorage; N]) -> TensorStorage,
+    G: FnOnce([GraphTensor; N]) -> Box<dyn GradFnTrait>,
+{
+    let first_operand_shape = &operands[0].node.storage.shape;
+    for o in operands {
+        assert_eq!(first_operand_shape, &o.node.storage.shape);
+    }
+
+    let storages: [&TensorStorage; N] = std::array::from_fn(|i| &operands[i].node.storage);
+    let out_store = op(&storages);
+
+    let new_operands: [GraphTensor; N] = std::array::from_fn(|i| operands[i].copy_s());
+    let grad_fn_box: Box<dyn GradFnTrait> = grad_fn(new_operands);
+
+    let out_node = TensorNode {
+        storage: out_store,
+        requires_grad: extract_requires_grad(operands),
+        grad_fn: Some(grad_fn_box),
+    };
+
+    GraphTensor { node: Rc::new(out_node) }
+}

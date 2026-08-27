@@ -1,4 +1,5 @@
 pub mod grad_fn;
+pub mod ops;
 
 use std::collections::{HashMap, VecDeque, HashSet};
 use std::hash::{Hash, Hasher};
@@ -12,11 +13,7 @@ pub struct TensorKey {
     node: Rc<TensorNode> // TODO or use GraphTensor directly
 }
 
-impl TensorKey {
-    fn get_node(&self) -> &TensorNode {
-        &self.node.as_ref()
-    }
-}
+impl TensorKey {}
 
 impl Clone for TensorKey {
     fn clone(&self) -> Self {
@@ -57,22 +54,6 @@ impl GraphTensor {
 
         let grads_map = topological_backprop(self.copy_s(), retain_graph);
         grads_map
-
-        // for graph_t in topo_sort_reverse(output) {
-        //     let key = Rc::as_ptr(&graph_t.node);
-        //     let Some(grad_out) = grads.get(&key).clone() else { continue };
-
-        //     let inputs = graph_t.node.op.inputs();          // parent Tensors
-        //     let input_grads = graph_t.node.op.vjp(&grad_out);
-
-        //     for (input, g) in inputs.iter().zip(input_grads) {
-        //         let ikey = Rc::as_ptr(&input.node);
-        //         grads.entry(ikey)
-        //             // .and_modify(|acc| *acc = Tensor::add(acc, &g)) // tracked op!
-        //             .and_modify(|acc| *acc = &*acc + &g) // tracked op!
-        //             .or_insert(g);
-        //     }
-        // }
     }
 }
 
@@ -90,7 +71,7 @@ fn compute_in_degree(seed: GraphTensor) -> HashMap<TensorKey, u64> { // TODO sho
 
     while let Some(u) = bfs_queue.pop_front() {
 
-        // Fix: Do not propagate through nodes that do not require gradients.
+        // do not propagate through nodes that do not require gradients.
         if !u.node.requires_grad {
             continue;
         }

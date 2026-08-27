@@ -47,7 +47,7 @@ impl TensorStorage {
         }
     }
 
-    fn logic_to_md(
+    pub fn logic_to_md(
         &self,
         l_idx: usize
     ) -> Vec<usize> {

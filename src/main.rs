@@ -3,8 +3,7 @@ mod data;
 
 use core::GraphTensor;
 
-use crate::core::tensor::{FreeTensor, AbstractTensor};
-use crate::core::grad::TensorKey;
+use crate::core::{storage::TensorStorage, tensor::AbstractTensor};
 
 fn main() {
     println!("Hello, world!");
@@ -47,9 +46,13 @@ fn main() {
 
     // dbg!(&grad.get_node().storage);
 
-    test_complex_operation()
-    // test_simple_operation()
+    let s = TensorStorage::new(vec![4, 3], 1.0);
 
+    // let sum = TensorStorage::sum(&s);
+    // dbg!(sum);
+
+    // test_complex_operation()
+    // test_simple_operation()
 }
 
 fn test_complex_operation() {

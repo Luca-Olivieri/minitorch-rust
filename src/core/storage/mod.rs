@@ -56,6 +56,18 @@ impl TensorStorage {
 
         self.flat_data[self.offset]
     }
+
+    fn copy_d(&self) -> TensorStorage {
+
+        Self {
+            flat_data: self.flat_data.clone(),
+            shape: self.shape.clone(),
+            strides: self.strides.clone(),
+            contiguous: self.is_contiguous(), // TODO should I make it contiguous?
+            numel: self.numel,
+            offset: self.offset,
+        }
+    }
 }
 
 fn are_dims_positive(shape: &Vec<usize>) -> bool {

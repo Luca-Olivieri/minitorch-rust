@@ -1,5 +1,5 @@
 use crate::core::storage::TensorStorage;
-use crate::core::grad::grad_fn::GradFnTrait;
+use crate::core::autograd::grad_fn::GradFnTrait;
 
 #[derive(Debug)]
 pub struct TensorNode {
