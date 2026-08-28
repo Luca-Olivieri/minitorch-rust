@@ -13,7 +13,6 @@ fn main() {
     // // let a = TensorStorage::new(shape.clone(), 5.1);
     // // let b = TensorStorage::new(shape.clone(), 9.2);
 
-
     // // println!("{}", TensorStorage::add(&a, &b));
     // // println!("{}", TensorStorage::minus(&a));
     // // println!("{}", TensorStorage::sub(&a, &b));
@@ -46,13 +45,14 @@ fn main() {
 
     // dbg!(&grad.get_node().storage);
 
-    let s = TensorStorage::new(vec![4, 3], 1.0);
-
     // let sum = TensorStorage::sum(&s);
     // dbg!(sum);
 
     // test_complex_operation()
     // test_simple_operation()
+
+    test_shapes();
+    // test_sum_dim();
 }
 
 fn test_complex_operation() {
@@ -153,4 +153,46 @@ fn test_simple_operation() {
     } else {
         println!("Gradient is 0 (Node disconnected from HOD graph)");
     }
+}
+
+fn test_shapes() {
+
+    let shape = vec![4, 2, 1, 3];
+
+    let a = GraphTensor::new(shape.clone(), 2.0, true); // [4, 2, 1, 3]
+    dbg!(&a.shape());
+    let b = a.squeeze(2); // [4, 2, 3]
+    dbg!(&b.shape());
+    let c = b.unsqueeze(3); // [4, 2, 3, 1]
+    dbg!(&c.shape());
+    let d = c.sum_dim(0); // [2, 3, 1]
+    dbg!(&d.shape());
+    let e = d.sum(); // []
+    dbg!(&e.shape());
+
+    let grads_map = e.backward(true);
+
+    println!( "============ r ============");
+    dbg!(&e.get_node().storage);
+    println!( "========== a.grad =========");
+    let da = grads_map.get(&a.to_key()).unwrap();
+    dbg!(&da.get_node().storage);
+
+    let da_grads_map = da.backward(true);
+
+    println!( "========== da.grad =========");
+    if let Some(d2a_da) = da_grads_map.get(&a.to_key()) {
+        dbg!(&d2a_da.get_node().storage);
+    } else {
+        println!("Gradient is 0 (Node disconnected from HOD graph)");
+    }
+}
+
+fn test_sum_dim() {
+
+    let shape = vec![4, 2, 1, 3];
+
+    let a = GraphTensor::new(shape.clone(), 2.0, true); // [4, 2, 1, 3]
+    let b = a.sum_dim(0); // [2, 1, 3]
+    dbg!(&b.shape());
 }

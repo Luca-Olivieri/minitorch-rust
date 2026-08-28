@@ -1,5 +1,5 @@
-pub mod grad_fn;
 pub mod ops;
+pub mod grad_fn;
 
 use std::collections::{HashMap, VecDeque, HashSet};
 use std::hash::{Hash, Hasher};

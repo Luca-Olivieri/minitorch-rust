@@ -7,6 +7,7 @@ pub type BackwardNeg = NBackwardOp<NegOp, 1>;
 
 impl GradRule<1> for NegOp {
     fn compute_grad(
+        &self,
         operands: &[GraphTensor; 1],
         in_grad: &GraphTensor
     ) -> Vec<Option<GraphTensor>> {
@@ -19,6 +20,7 @@ pub struct LnOp;
 pub type BackwardLn = NBackwardOp<LnOp, 1>;
 impl GradRule<1> for LnOp {
     fn compute_grad(
+        &self,
         operands: &[GraphTensor; 1],
         in_grad: &GraphTensor
     ) -> Vec<Option<GraphTensor>> {
@@ -47,6 +49,8 @@ impl GradRule<1> for LnOp {
 //         todo!()
 //     }
 // }
+//
+//
 
 #[derive(Debug)]
 pub struct AddOp;
@@ -54,6 +58,7 @@ pub type BackwardAdd = NBackwardOp<AddOp, 2>;
 
 impl GradRule<2> for AddOp {
     fn compute_grad(
+        &self,
         operands: &[GraphTensor; 2],
         in_grad: &GraphTensor
     ) -> Vec<Option<GraphTensor>> {
@@ -71,6 +76,7 @@ pub type BackwardSub = NBackwardOp<SubOp, 2>;
 
 impl GradRule<2> for SubOp {
     fn compute_grad(
+        &self,
         operands: &[GraphTensor; 2],
         in_grad: &GraphTensor
     ) -> Vec<Option<GraphTensor>> {
@@ -89,6 +95,7 @@ pub type BackwardMul = NBackwardOp<MulOp, 2>;
 
 impl GradRule<2> for MulOp {
     fn compute_grad(
+        &self,
         operands: &[GraphTensor; 2],
         in_grad: &GraphTensor
     ) -> Vec<Option<GraphTensor>> {
@@ -105,6 +112,7 @@ pub struct DivOp;
 pub type BackwardDiv = NBackwardOp<DivOp, 2>;
 impl GradRule<2> for DivOp {
     fn compute_grad(
+        &self,
         operands: &[GraphTensor; 2],
         in_grad: &GraphTensor
     ) -> Vec<Option<GraphTensor>> {
@@ -125,6 +133,7 @@ pub struct PowOp;
 pub type BackwardPow = NBackwardOp<PowOp, 2>;
 impl GradRule<2> for PowOp {
     fn compute_grad(
+        &self,
         operands: &[GraphTensor; 2],
         in_grad: &GraphTensor
     ) -> Vec<Option<GraphTensor>> {

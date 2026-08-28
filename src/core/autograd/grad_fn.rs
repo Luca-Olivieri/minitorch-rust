@@ -1,18 +1,15 @@
-use crate::core::{GraphTensor};
-use std::marker::PhantomData;
+use crate::core::GraphTensor;
+use std::fmt::Debug;
 
-/// Generic backward-op container: stores operands, arity N, delegates
-/// gradient computation to the zero-sized policy type `Op`.
+/// Generic backward-op container: stores operands, arity N, and the operation state.
 #[derive(Debug)]
 pub struct NBackwardOp<Op, const N: usize> {
     pub(crate) operands: [GraphTensor; N],
-    pub(crate) _marker: PhantomData<Op>,
+    pub(crate) op: Op, // Holds the actual struct (and its fields like `dim`)
 }
 
-impl<Op, const N: usize> NBackwardOp<Op, N> {}
-
-pub trait GradFnTrait: HasOperands + ComputesGrads + std::fmt::Debug {}
-impl<T: HasOperands + ComputesGrads + std::fmt::Debug> GradFnTrait for T {}
+pub trait GradFnTrait: HasOperands + ComputesGrads + Debug {}
+impl<T: HasOperands + ComputesGrads + Debug> GradFnTrait for T {}
 
 pub trait HasOperands {
     fn get_operands(&self) -> &[GraphTensor];
@@ -22,24 +19,25 @@ pub trait ComputesGrads {
     fn compute_operands_grad(&self, in_grad: &GraphTensor) -> Vec<Option<GraphTensor>>;
 }
 
-// Written ONCE, for every N and every Op.
 impl<Op, const N: usize> HasOperands for NBackwardOp<Op, N> {
     fn get_operands(&self) -> &[GraphTensor] {
         &self.operands
     }
 }
 
-/// The actual per-op math lives here. `Op` types are zero-sized markers.
+/// The actual per-op math lives here.
+/// It takes `&self` so it can access operation-specific parameters (like `dim`).
 pub trait GradRule<const N: usize> {
     fn compute_grad(
+        &self, // <-- Added `&self` to access struct fields
         operands: &[GraphTensor; N],
         in_grad: &GraphTensor,
     ) -> Vec<Option<GraphTensor>>;
 }
 
-// Written ONCE, for every Op that implements GradRule<N>.
 impl<Op: GradRule<N>, const N: usize> ComputesGrads for NBackwardOp<Op, N> {
     fn compute_operands_grad(&self, in_grad: &GraphTensor) -> Vec<Option<GraphTensor>> {
-        Op::compute_grad(&self.operands, in_grad)
+        // Call it as a method on `self.op`
+        self.op.compute_grad(&self.operands, in_grad)
     }
 }

@@ -12,33 +12,27 @@ use crate::core::node::TensorNode;
 use crate::core::storage::TensorStorage;
 use crate::core::autograd::grad_fn::GradFnTrait;
 use crate::core::tensor::extract_requires_grad;
-use crate::core::autograd::ops::{
-    BackwardAdd,
-    BackwardDiv,
-    BackwardLn,
-    BackwardMul,
-    BackwardNeg,
-    BackwardPow,
-    BackwardSub
+use crate::core::autograd::ops::math::{
+    AddOp, BackwardAdd, BackwardDiv, BackwardLn, BackwardMul, BackwardNeg, BackwardPow, BackwardSub, DivOp, LnOp, MulOp, NegOp, PowOp, SubOp
 };
 
 impl GraphTensor {
-    impl_tensor_unary_op!(ln, TensorStorage::ln, BackwardLn);
+    impl_tensor_unary_op!(ln, TensorStorage::ln, BackwardLn, LnOp);
 
-    impl_tensor_binary_op!(pow, TensorStorage::pow, BackwardPow);
+    impl_tensor_binary_op!(pow, TensorStorage::pow, BackwardPow, PowOp);
 
     // impl_tensor_unary_op!(sum, TensorStorage::sum, BackwardLn); // Use the ctual
 }
 
 impl_tensor_binary_ops! {
-    Add, add, TensorStorage::add,  BackwardAdd;
-    Sub, sub, TensorStorage::sub,  BackwardSub;
-    Mul, mul, TensorStorage::mul,  BackwardMul;
-    Div, div, TensorStorage::div,  BackwardDiv;
+    Add, add, TensorStorage::add,  BackwardAdd, AddOp;
+    Sub, sub, TensorStorage::sub,  BackwardSub, SubOp;
+    Mul, mul, TensorStorage::mul,  BackwardMul, MulOp;
+    Div, div, TensorStorage::div,  BackwardDiv, DivOp;
 }
 
 impl_tensor_unary_ops! {
-    Neg, neg, TensorStorage::neg, BackwardNeg;
+    Neg, neg, TensorStorage::neg, BackwardNeg, NegOp;
 }
 
 pub fn apply_tensor_op<F, G, const N: usize>(

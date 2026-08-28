@@ -1,5 +1,5 @@
 use crate::core::storage::TensorStorage;
-use std::ops::{Index, IndexMut};
+use std::{ops::{Index, IndexMut}, rc::Rc};
 
 impl TensorStorage {
 
@@ -54,16 +54,12 @@ impl TensorStorage {
         if l_idx >= self.numel {
             panic!("Logical index {} out of bounds for tensor of size {}.", l_idx, self.numel);
         }
-
         let mut curr_idx = l_idx;
-
-        let mut md = Vec::with_capacity(self.shape.len());
-
+        let mut md = vec![0; self.shape.len()];
         for i in (0..self.shape.len()).rev() {
-            md.push(curr_idx % self.shape[i]);
+            md[i] = curr_idx % self.shape[i];
             curr_idx /= self.shape[i];
         }
-
         md
     }
 }
@@ -90,13 +86,17 @@ impl Index<usize> for TensorStorage {
     }
 }
 
+// TODO alternatively, the two IdexMut methods down here can be removed, and when they are used,
+// modify the flat_data directly BEFORE giving it to the TensorStorage
 impl IndexMut<&Vec<usize>> for TensorStorage {
     fn index_mut(
         &mut self,
         md_idx: &Vec<usize>
     ) -> &mut f64 {
         let f_idx = self.md_to_flat(md_idx);
-        &mut self.flat_data[f_idx]
+        let mut_rc = &mut self.flat_data;
+        let mut_vec = Rc::get_mut(mut_rc).unwrap();
+        &mut mut_vec[f_idx]
     }
 }
 
@@ -106,6 +106,8 @@ impl IndexMut<usize> for TensorStorage {
         i: usize
     ) -> &mut f64 {
         let f_idx = self.logic_to_flat(i);
-        &mut self.flat_data[f_idx]
+        let mut_rc = &mut self.flat_data;
+        let mut_vec = Rc::get_mut(mut_rc).unwrap();
+        &mut mut_vec[f_idx]
     }
 }

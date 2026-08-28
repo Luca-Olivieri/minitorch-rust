@@ -2,10 +2,12 @@ pub mod indexing;
 pub mod ops;
 pub mod format;
 
+use std::rc::Rc;
+
 // TODO make the numbers generic (not tied to f64)
 #[derive(Debug)]
 pub struct TensorStorage {
-    pub(super) flat_data: Vec<f64>,
+    pub(super) flat_data: Rc<Vec<f64>>,
     pub shape: Vec<usize>,
     pub(super) strides: Vec<usize>,
     pub(super) contiguous: bool,
@@ -29,7 +31,7 @@ impl TensorStorage {
         let strides = init_strides(&shape);
 
         Self {
-            flat_data: vec![fill_value; numel],
+            flat_data: Rc::new(vec![fill_value; numel]),
             shape,
             strides: strides,
             contiguous: true,
@@ -38,7 +40,7 @@ impl TensorStorage {
         }
     }
 
-    fn is_contiguous(&self) -> bool {
+    fn check_contiguity(&self) -> bool {
         let contiguous_strides = init_strides(&self.shape);
 
         for i in 0..self.shape.len() {
@@ -55,18 +57,6 @@ impl TensorStorage {
         }
 
         self.flat_data[self.offset]
-    }
-
-    fn copy_d(&self) -> TensorStorage {
-
-        Self {
-            flat_data: self.flat_data.clone(),
-            shape: self.shape.clone(),
-            strides: self.strides.clone(),
-            contiguous: self.is_contiguous(), // TODO should I make it contiguous?
-            numel: self.numel,
-            offset: self.offset,
-        }
     }
 }
 
