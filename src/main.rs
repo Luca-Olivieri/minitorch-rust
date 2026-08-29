@@ -53,7 +53,8 @@ fn main() {
 
     // test_shapes();
     // test_sum_dim();
-    test_one_hot();
+    // test_one_hot();
+    test_matmul();
 }
 
 fn test_complex_operation() {
@@ -220,4 +221,37 @@ fn test_one_hot() {
 
     println!( "============ r ============");
     println!("{}", &oh.get_node().storage);
+}
+
+fn test_matmul() {
+
+    let a_shape = vec![2, 3];
+    let b_shape = vec![3, 4];
+    let c_shape = vec![2, 4];
+
+    let a = GraphTensor::new(a_shape.clone(), 1.0, true);
+    let b = GraphTensor::new(b_shape.clone(), 1.0, true);
+
+    let x = GraphTensor::matmul(&a, &b);
+
+    let grads_map = x.backward(true);
+
+    println!( "============ r ============");
+    dbg!(&x.get_node().storage);
+    println!( "========== a.grad =========");
+    let da = grads_map.get(&a.to_key()).unwrap();
+    dbg!(&da.get_node().storage);
+
+    println!( "========== b.grad =========");
+    let db = grads_map.get(&b.to_key()).unwrap();
+    dbg!(&db.get_node().storage);
+
+    let da_grads_map = da.backward(true);
+
+    println!( "========== da.grad =========");
+    if let Some(d2a_da) = da_grads_map.get(&a.to_key()) {
+        dbg!(&d2a_da.get_node().storage);
+    } else {
+        println!("Gradient is 0 (Node disconnected from HOD graph)");
+    }
 }

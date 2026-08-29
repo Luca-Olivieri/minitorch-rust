@@ -65,7 +65,7 @@ impl GraphTensor {
         &self,
         num_classes: usize // TODO is this the best integer type here?
     ) -> GraphTensor {
-        let in_shape = &self.shape();
+        let in_shape = self.shape();
         let in_numel = self.numel();
 
         // Build output shape by appending classes as the last dimension
@@ -118,5 +118,57 @@ impl GraphTensor {
         };
 
         Self { node: Rc::new(out_node) }
+    }
+
+    pub fn matmul(
+        a: &GraphTensor,
+        b: &GraphTensor
+    ) -> GraphTensor {
+        let a_shape = a.shape();
+        let b_shape = b.shape();
+
+        let a_ndim = a_shape.len();
+        let b_ndim = b_shape.len();
+
+        if !((a_ndim == 1 || a_ndim == 2) && (b_ndim == 1 || b_ndim == 2)) {
+            panic!("matmul requires 1D or 2D tensors, got {}D and {}D", a_ndim, b_ndim);
+        }
+
+        // Convert 1D inputs to 2D views: a [K] -> [1,K], b [K] -> [K,1]
+        let a_was_1d = a_ndim == 1;
+        let b_was_1d = b_ndim == 1;
+
+        let a2 = if a_was_1d { a.unsqueeze(0) } else { a.copy_s() };
+        let b2 = if b_was_1d { b.unsqueeze(0) } else { b.copy_s() };
+
+        let a2_shape = a2.shape(); // [m, k]
+        let b2_shape = b2.shape(); // [kb, n]
+
+        let m = a2_shape[0];
+        let k = a2_shape[1];
+        let kb = b2_shape[0];
+        let n = b2_shape[1];
+
+        if k != kb {
+            panic!("matmul inner dimensions must match ({} != {})", k, kb);
+        }
+
+        // Use unsqueeze->expand->mult->sum pipeline on 2D views
+        let a_expanded = a2.unsqueeze(2).expand(2, n); // [m, k] -> [m,k,1] -> [m,k,n]
+        let b_expanded = b2.unsqueeze(0).expand(0, m); // [k, n] -> [1,k,n] -> [m,k,n]
+
+        let prod = &a_expanded * &b_expanded; // element-wise [m,k,n]
+        let mut out = prod.sum_dim(1); // sum over k -> [m,n]
+
+        // Squeeze result back to original dimensionality
+        if a_was_1d && b_was_1d {
+            out = out.squeeze(0).squeeze(0); // scalar
+        } else if a_was_1d {
+            out = out.squeeze(0); // shape [N]
+        } else if b_was_1d {
+            out = out.squeeze(1); // shape [M]
+        }
+
+        out
     }
 }
