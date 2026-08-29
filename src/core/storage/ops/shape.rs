@@ -63,7 +63,7 @@ impl TensorStorage {
 
         // remove the stride corresponding to the squeezed dim
         out.strides = a.strides.clone();
-        out.strides.insert(dim, 0);
+        out.strides.remove(dim);
 
         out.contiguous = a.contiguous;
         out.numel = compute_numel_from_shape(&out.shape);

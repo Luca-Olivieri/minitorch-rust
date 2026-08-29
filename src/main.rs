@@ -177,22 +177,25 @@ fn test_shapes() {
     println!( "========== a.grad =========");
     let da = grads_map.get(&a.to_key()).unwrap();
     dbg!(&da.get_node().storage);
+    println!( "========== b.grad =========");
+    let db = grads_map.get(&b.to_key()).unwrap();
+    dbg!(&db.get_node().storage);
+    println!( "========== c.grad =========");
+    let dc = grads_map.get(&c.to_key()).unwrap();
+    dbg!(&dc.get_node().storage);
+    println!( "========== d.grad =========");
+    let dd = grads_map.get(&d.to_key()).unwrap();
+    dbg!(&dd.get_node().storage);
+    println!( "========== e.grad =========");
+    let de = grads_map.get(&e.to_key()).unwrap();
+    dbg!(&de.get_node().storage);
 
     let da_grads_map = da.backward(true);
 
-    println!( "========== da.grad =========");
-    if let Some(d2a_da) = da_grads_map.get(&a.to_key()) {
-        dbg!(&d2a_da.get_node().storage);
-    } else {
-        println!("Gradient is 0 (Node disconnected from HOD graph)");
-    }
-}
-
-fn test_sum_dim() {
-
-    let shape = vec![4, 2, 1, 3];
-
-    let a = GraphTensor::new(shape.clone(), 2.0, true); // [4, 2, 1, 3]
-    let b = a.sum_dim(0); // [2, 1, 3]
-    dbg!(&b.shape());
+    // println!( "========== da.grad =========");
+    // if let Some(d2a_da) = da_grads_map.get(&a.to_key()) {
+    //     dbg!(&d2a_da.get_node().storage);
+    // } else {
+    //     println!("Gradient is 0 (Node disconnected from HOD graph)");
+    // }
 }
