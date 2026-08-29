@@ -165,7 +165,7 @@ fn test_shapes() {
     dbg!(&b.shape());
     let c = b.unsqueeze(3); // [4, 2, 3, 1]
     dbg!(&c.shape());
-    let d = c.sum_dim(0); // [2, 3, 1]
+    let d = c.sum_dim(1); // [2, 3, 1]
     dbg!(&d.shape());
     let e = d.sum(); // []
     dbg!(&e.shape());

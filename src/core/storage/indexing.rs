@@ -71,7 +71,7 @@ impl Index<&Vec<usize>> for TensorStorage {
         &self,
         md_idx: &Vec<usize>
     ) -> &f64 {
-        &self.flat_data[self.md_to_flat(md_idx)]
+        &self.buffer[self.md_to_flat(md_idx)]
     }
 }
 
@@ -82,7 +82,7 @@ impl Index<usize> for TensorStorage {
         &self,
         i: usize
     ) -> &f64 {
-        &self.flat_data[self.logic_to_flat(i)]
+        &self.buffer[self.logic_to_flat(i)]
     }
 }
 
@@ -94,7 +94,7 @@ impl IndexMut<&Vec<usize>> for TensorStorage {
         md_idx: &Vec<usize>
     ) -> &mut f64 {
         let f_idx = self.md_to_flat(md_idx);
-        let mut_rc = &mut self.flat_data;
+        let mut_rc = &mut self.buffer;
         let mut_vec = Rc::get_mut(mut_rc).unwrap();
         &mut mut_vec[f_idx]
     }
@@ -106,7 +106,7 @@ impl IndexMut<usize> for TensorStorage {
         i: usize
     ) -> &mut f64 {
         let f_idx = self.logic_to_flat(i);
-        let mut_rc = &mut self.flat_data;
+        let mut_rc = &mut self.buffer;
         let mut_vec = Rc::get_mut(mut_rc).unwrap();
         &mut mut_vec[f_idx]
     }

@@ -11,7 +11,7 @@ impl fmt::Display for TensorStorage {
         write!(f, "       data=")?;
 
         if self.shape.is_empty() {
-            if let Some(&val) = self.flat_data.get(0) {
+            if let Some(&val) = self.buffer.get(0) {
                 write!(f, "{:.4}", val)?;
             }
         } else {

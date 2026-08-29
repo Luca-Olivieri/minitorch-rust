@@ -7,7 +7,7 @@ use std::rc::Rc;
 // TODO make the numbers generic (not tied to f64)
 #[derive(Debug)]
 pub struct TensorStorage {
-    pub(super) flat_data: Rc<Vec<f64>>,
+    pub(super) buffer: Rc<Vec<f64>>,
     pub shape: Vec<usize>,
     pub(super) strides: Vec<usize>,
     pub(super) contiguous: bool,
@@ -31,8 +31,29 @@ impl TensorStorage {
         let strides = init_strides(&shape);
 
         Self {
-            flat_data: Rc::new(vec![fill_value; numel]),
-            shape,
+            buffer: Rc::new(vec![fill_value; numel]),
+            shape: shape,
+            strides: strides,
+            contiguous: true,
+            numel: numel,
+            offset: 0,
+        }
+    }
+
+    pub fn new_uninit(
+        shape: Vec<usize>
+    ) -> Self {
+
+        if !are_dims_positive(&shape) {
+            panic!("Tensor shape must have positive dimensions. Got {shape:?}.")
+        }
+
+        let numel = compute_numel_from_shape(&shape);
+        let strides = init_strides(&shape);
+
+        Self {
+            buffer: Rc::new(Vec::with_capacity(numel)),
+            shape: shape,
             strides: strides,
             contiguous: true,
             numel: numel,
@@ -56,7 +77,7 @@ impl TensorStorage {
             panic!("Cannot call item() on a non-singleton tensor (shape {:?}).", self.shape)
         }
 
-        self.flat_data[self.offset]
+        self.buffer[self.offset]
     }
 }
 

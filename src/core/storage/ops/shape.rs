@@ -1,11 +1,11 @@
 use std::rc::Rc;
 
-use crate::core::storage::{TensorStorage, compute_numel_from_shape};
+use crate::core::storage::TensorStorage;
 
 impl TensorStorage {
     pub fn copy_d(a: &TensorStorage) -> TensorStorage {
         TensorStorage {
-            flat_data: Rc::new(a.flat_data.as_ref().clone()),
+            buffer: Rc::new(a.buffer.as_ref().clone()),
             shape: a.shape.clone(),
             strides: a.strides.clone(),
             contiguous: a.contiguous,
@@ -22,23 +22,18 @@ impl TensorStorage {
             panic!("Unsqueezed dimension {} out of range for shape of length {:?}.", dim, a.shape);
         }
 
-         // build output shape
-        let out_shape = unsqueeze_shape(&a.shape, dim);
-
-        // TODO inefficient: creates the whole tensors, then overrides some of its values
+        let mut out_strides = a.strides.clone();
+        out_strides.insert(dim, 0);
 
         // make a view: share the underlying flat data and keep the same offset
-        let mut out = TensorStorage::new(out_shape, 0.0);
-        out.flat_data = Rc::clone(&a.flat_data);
-        out.offset = a.offset;
-
-        out.strides = a.strides.clone();
-        out.strides.insert(dim, 0);
-
-        out.contiguous = a.contiguous;
-        out.numel = compute_numel_from_shape(&out.shape);
-
-        out
+        Self {
+            buffer: Rc::clone(&a.buffer),
+            shape: unsqueeze_shape(&a.shape, dim),
+            strides: out_strides,
+            contiguous: a.contiguous,
+            numel: a.numel,
+            offset: a.offset,
+        }
     }
 
     pub fn squeeze(
@@ -53,22 +48,19 @@ impl TensorStorage {
             panic!("Squeezed dimension {} must be singleton. Got size {:?}.", dim, a.shape);
         }
 
-        // build output shape
-        let out_shape = squeeze_shape(&a.shape, dim);
+        // remove the stride corresponding to the squeezed dim
+        let mut out_strides = a.strides.clone();
+        out_strides.remove(dim);
 
         // make a view: share the underlying flat data and keep the same offset
-        let mut out = TensorStorage::new(out_shape, 0.0);
-        out.flat_data = Rc::clone(&a.flat_data);
-        out.offset = a.offset;
-
-        // remove the stride corresponding to the squeezed dim
-        out.strides = a.strides.clone();
-        out.strides.remove(dim);
-
-        out.contiguous = a.contiguous;
-        out.numel = compute_numel_from_shape(&out.shape);
-
-        out
+        Self {
+            buffer: Rc::clone(&a.buffer),
+            shape: squeeze_shape(&a.shape, dim),
+            strides: out_strides,
+            contiguous: a.contiguous,
+            numel: a.numel,
+            offset: a.offset,
+        }
     }
 
     pub fn expand(
@@ -88,19 +80,18 @@ impl TensorStorage {
         let mut out_shape = a.shape.clone();
         out_shape[dim] = times;
 
+        let mut out_strides = a.strides.clone();
+        out_strides[dim] = 0; // this stride maps to the same underlying element
+
         // make a view: share the underlying flat data and keep the same offset
-        let mut out = TensorStorage::new(out_shape, 0.0);
-
-        out.flat_data = Rc::clone(&a.flat_data);
-        out.offset = a.offset;
-
-        out.strides = a.strides.clone();
-        out.strides[dim] = 0; // this stride maps to the same underlying element
-
-        out.contiguous = a.contiguous;
-        out.numel = compute_numel_from_shape(&out.shape);
-
-        out
+        Self {
+            buffer: Rc::clone(&a.buffer),
+            shape: out_shape,
+            strides: out_strides,
+            contiguous: a.contiguous,
+            numel: a.numel*times,
+            offset: a.offset,
+        }
     }
 }
 

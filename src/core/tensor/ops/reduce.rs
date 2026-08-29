@@ -2,7 +2,7 @@ use crate::core::GraphTensor;
 
 use crate::core::autograd::ops::reduce::{BackwardSumDim, SumDimOp};
 use crate::core::storage::TensorStorage;
-use crate::core::tensor::{AbstractTensor, Tensor};
+use crate::core::tensor::AbstractTensor;
 use crate::core::tensor::ops::math::apply_tensor_op;
 use crate::core::autograd::grad_fn::GradFnTrait;
 
@@ -26,7 +26,7 @@ impl GraphTensor {
         &self,
     ) -> GraphTensor {
 
-        let mut out: GraphTensor = self.copy_d();
+        let mut out = self.copy_s();
 
         for _ in 0..self.shape().len() {
             out = out.sum_dim(0);
