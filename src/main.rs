@@ -3,7 +3,7 @@ mod data;
 
 use core::GraphTensor;
 
-use crate::core::{storage::TensorStorage, tensor::AbstractTensor};
+use crate::core::{storage::TensorStorage, tensor::{AbstractTensor, FreeTensor}};
 
 fn main() {
     println!("Hello, world!");
@@ -51,8 +51,9 @@ fn main() {
     // test_complex_operation()
     // test_simple_operation()
 
-    test_shapes();
+    // test_shapes();
     // test_sum_dim();
+    test_one_hot();
 }
 
 fn test_complex_operation() {
@@ -198,4 +199,25 @@ fn test_shapes() {
     // } else {
     //     println!("Gradient is 0 (Node disconnected from HOD graph)");
     // }
+}
+
+fn test_one_hot() {
+
+    let shape = vec![4, 2];
+
+    let mut f = FreeTensor::new(shape.clone(), 2.0, true);
+    f.set(&vec![0, 0], 3.0);
+    f.set(&vec![0, 1], 3.0);
+    f.set(&vec![1, 0], 2.0);
+    f.set(&vec![1, 1], 2.0);
+    f.set(&vec![2, 0], 1.0);
+    f.set(&vec![2, 1], 1.0);
+    f.set(&vec![3, 0], 0.0);
+    f.set(&vec![3, 1], 0.0);
+
+    let a = f.to_graph();
+    let oh = a.one_hot(4);
+
+    println!( "============ r ============");
+    println!("{}", &oh.get_node().storage);
 }

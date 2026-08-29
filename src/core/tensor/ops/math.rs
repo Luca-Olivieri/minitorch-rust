@@ -1,3 +1,4 @@
+use std::io::ErrorKind::Other;
 use std::rc::Rc;
 use std::ops::{
     Add,
@@ -7,7 +8,7 @@ use std::ops::{
     Div,
 };
 
-use crate::core::tensor::GraphTensor;
+use crate::core::tensor::{AbstractTensor, GraphTensor};
 use crate::core::node::TensorNode;
 use crate::core::storage::TensorStorage;
 use crate::core::autograd::grad_fn::GradFnTrait;
@@ -22,6 +23,8 @@ impl GraphTensor {
     impl_tensor_binary_op!(pow, TensorStorage::pow, BackwardPow, PowOp);
 
     // impl_tensor_unary_op!(sum, TensorStorage::sum, BackwardLn); // Use the ctual
+    //
+    //
 }
 
 impl_tensor_binary_ops! {
@@ -62,4 +65,49 @@ where
     };
 
     GraphTensor { node: Rc::new(out_node) }
+}
+
+// TODO make this scalar operations into a macro
+impl Add<f64> for &GraphTensor {
+    type Output = GraphTensor;
+    fn add(
+        self,
+        other: f64
+    ) -> GraphTensor {
+        let other_t = GraphTensor::new(self.shape().clone(), other, false);
+        self + &other_t
+    }
+}
+
+impl Sub<f64> for &GraphTensor {
+    type Output = GraphTensor;
+    fn sub(
+        self,
+        other: f64
+    ) -> GraphTensor {
+        let other_t = GraphTensor::new(self.shape().clone(), other, false);
+        self - &other_t
+    }
+}
+
+impl Mul<f64> for &GraphTensor {
+    type Output = GraphTensor;
+    fn mul(
+        self,
+        other: f64
+    ) -> GraphTensor {
+        let other_t = GraphTensor::new(self.shape().clone(), other, false);
+        self * &other_t
+    }
+}
+
+impl Div<f64> for &GraphTensor {
+    type Output = GraphTensor;
+    fn div(
+        self,
+        other: f64
+    ) -> GraphTensor {
+        let other_t = GraphTensor::new(self.shape().clone(), other, false);
+        self / &other_t
+    }
 }

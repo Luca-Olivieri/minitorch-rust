@@ -129,8 +129,6 @@ fn topological_backprop(
                         let a = grads_map.get(&op.to_key()).unwrap();
                         grads_map.insert(op.to_key(), a + op_grad);
                     } else {
-                        // let zeros = GraphTensor::new(u.node.storage.shape.clone(), 0.0, false);
-                        // grads_map.insert(op.to_key(), op_grad + &zeros);
                         grads_map.insert(op.to_key(), op_grad.copy_s());
                     }
                 }

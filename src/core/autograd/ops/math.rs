@@ -30,7 +30,7 @@ impl GradRule<1> for LnOp {
         let mut out_grads = Vec::with_capacity(1);
 
         out_grads.push(a.requires_grad().then(|| {
-            in_grad / &a
+            in_grad / a
         }));
 
         out_grads
@@ -63,9 +63,8 @@ impl GradRule<2> for AddOp {
         in_grad: &GraphTensor
     ) -> Vec<Option<GraphTensor>> {
         let mut out_grads = Vec::with_capacity(2);
-        let ones = GraphTensor::new(operands[0].shape().clone(), 1.0, false); // TODO use a utility to deep copy instead
-        out_grads.push(operands[0].requires_grad().then(|| in_grad * &ones));
-        out_grads.push(operands[1].requires_grad().then(|| in_grad * &ones));
+        out_grads.push(operands[0].requires_grad().then(|| in_grad.copy_d()));
+        out_grads.push(operands[1].requires_grad().then(|| in_grad.copy_d()));
         out_grads
     }
 }
@@ -81,10 +80,8 @@ impl GradRule<2> for SubOp {
         in_grad: &GraphTensor
     ) -> Vec<Option<GraphTensor>> {
         let mut out_grads = Vec::with_capacity(2);
-        let ones = GraphTensor::new(operands[0].shape().clone(), 1.0, false); // TODO use a utility to deep copy instead
-        let minus_ones = GraphTensor::new(operands[0].shape().clone(), -1.0, false); // TODO use a utility to deep copy instead
-        out_grads.push(operands[0].requires_grad().then(|| in_grad * &ones));
-        out_grads.push(operands[1].requires_grad().then(|| in_grad * &minus_ones));
+        out_grads.push(operands[0].requires_grad().then(|| in_grad.copy_d()));
+        out_grads.push(operands[1].requires_grad().then(|| -in_grad));
         out_grads
     }
 }
@@ -145,8 +142,7 @@ impl GradRule<2> for PowOp {
         let mut out_grads = Vec::with_capacity(2);
 
         out_grads.push(base.requires_grad().then(|| {
-            let ones = GraphTensor::new(exp.shape().clone(), 1.0, false); // TODO use a utility to deep copy instead
-            let exp_minus_one = exp - &ones;
+            let exp_minus_one = exp - 1.0;
             &(in_grad * exp) * &base.pow(&exp_minus_one)
         }));
 

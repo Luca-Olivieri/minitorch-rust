@@ -63,6 +63,14 @@ impl FreeTensor {
 
         Self { node: Box::new(node) }
     }
+
+    pub fn to_graph(
+        self,
+    ) -> GraphTensor {
+        GraphTensor {
+            node: Rc::from(self.node)
+        }
+    }
 }
 
 #[derive(Debug)]
