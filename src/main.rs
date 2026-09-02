@@ -3,7 +3,10 @@ mod data;
 
 use core::GraphTensor;
 
-use crate::core::{storage::TensorStorage, tensor::{AbstractTensor, FreeTensor}};
+use crate::core::{nn::{activate::ReLU, compute::Linear, module::Forward1}, storage::TensorStorage, tensor::{AbstractTensor, FreeTensor}};
+
+use rand::rngs::StdRng;
+use rand::SeedableRng;
 
 fn main() {
     println!("Hello, world!");
@@ -54,7 +57,9 @@ fn main() {
     // test_shapes();
     // test_sum_dim();
     // test_one_hot();
-    test_matmul();
+    // test_matmul();
+
+    test_linear_relu();
 }
 
 fn test_complex_operation() {
@@ -227,7 +232,6 @@ fn test_matmul() {
 
     let a_shape = vec![2, 3];
     let b_shape = vec![3, 4];
-    let c_shape = vec![2, 4];
 
     let a = GraphTensor::new(a_shape.clone(), 1.0, true);
     let b = GraphTensor::new(b_shape.clone(), 1.0, true);
@@ -251,6 +255,38 @@ fn test_matmul() {
     println!( "========== da.grad =========");
     if let Some(d2a_da) = da_grads_map.get(&a.to_key()) {
         dbg!(&d2a_da.get_node().storage);
+    } else {
+        println!("Gradient is 0 (Node disconnected from HOD graph)");
+    }
+}
+
+fn test_linear_relu() {
+
+    let rng = StdRng::seed_from_u64(42);
+
+    let lin = Linear::new(3, 4, true, rng);
+    let relu = ReLU::new();
+
+    let x_shape = vec![2, 3];
+
+    let x = GraphTensor::new(x_shape.clone(), 1.0, true);
+
+    let a = lin.forward(&x);
+    let b = relu.forward(&a);
+
+    let grads_map = b.backward(true);
+
+    println!( "============ b ============");
+    dbg!(&b.get_node().storage);
+    println!( "========== x.grad =========");
+    let dx = grads_map.get(&x.to_key()).unwrap();
+    dbg!(&dx.get_node().storage);
+
+    let dx_grads_map = dx.backward(true);
+
+    println!( "========== dx.grad =========");
+    if let Some(d2x_dx) = dx_grads_map.get(&x.to_key()) {
+        dbg!(&d2x_dx.get_node().storage);
     } else {
         println!("Gradient is 0 (Node disconnected from HOD graph)");
     }

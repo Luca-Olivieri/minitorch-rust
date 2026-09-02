@@ -1,4 +1,3 @@
-use std::io::ErrorKind::Other;
 use std::rc::Rc;
 use std::ops::{
     Add,
@@ -14,17 +13,13 @@ use crate::core::storage::TensorStorage;
 use crate::core::autograd::grad_fn::GradFnTrait;
 use crate::core::tensor::extract_requires_grad;
 use crate::core::autograd::ops::math::{
-    AddOp, BackwardAdd, BackwardDiv, BackwardLn, BackwardMul, BackwardNeg, BackwardPow, BackwardSub, DivOp, LnOp, MulOp, NegOp, PowOp, SubOp
+    AddOp, BackwardAdd, BackwardDiv, BackwardLn, BackwardMaximum, BackwardMul, BackwardNeg, BackwardPow, BackwardSub, DivOp, LnOp, MaximumOp, MulOp, NegOp, PowOp, SubOp
 };
 
 impl GraphTensor {
     impl_tensor_unary_op!(ln, TensorStorage::ln, BackwardLn, LnOp);
-
     impl_tensor_binary_op!(pow, TensorStorage::pow, BackwardPow, PowOp);
-
-    // impl_tensor_unary_op!(sum, TensorStorage::sum, BackwardLn); // Use the ctual
-    //
-    //
+    impl_tensor_binary_op!(maximum, TensorStorage::maximum, BackwardMaximum, MaximumOp);
 }
 
 impl_tensor_binary_ops! {
@@ -40,7 +35,7 @@ impl_tensor_unary_ops! {
 
 pub fn apply_tensor_op<F, G, const N: usize>(
     op: F,
-    grad_fn: G,
+    grad_fn: Option<G>,
     operands: &[&GraphTensor; N],
 ) -> GraphTensor
 where
@@ -55,13 +50,16 @@ where
     let storages: [&TensorStorage; N] = std::array::from_fn(|i| &operands[i].node.storage);
     let out_store = op(&storages);
 
-    let new_operands: [GraphTensor; N] = std::array::from_fn(|i| operands[i].copy_s());
-    let grad_fn_box: Box<dyn GradFnTrait> = grad_fn(new_operands);
+    // Only copy operands and generate grad_fn_box if a grad_fn was provided
+    let grad_fn_box: Option<Box<dyn GradFnTrait>> = grad_fn.map(|g| {
+        let new_operands: [GraphTensor; N] = std::array::from_fn(|i| operands[i].copy_s());
+        g(new_operands)
+    });
 
     let out_node = TensorNode {
         storage: out_store,
-        requires_grad: extract_requires_grad(operands),
-        grad_fn: Some(grad_fn_box),
+        requires_grad: grad_fn_box.is_some() && extract_requires_grad(operands),
+        grad_fn: grad_fn_box,
     };
 
     GraphTensor { node: Rc::new(out_node) }

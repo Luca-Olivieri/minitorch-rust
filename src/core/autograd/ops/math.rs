@@ -37,21 +37,6 @@ impl GradRule<1> for LnOp {
     }
 }
 
-// #[derive(Debug)]
-// pub struct AbsOp;
-// pub type BackwardAbs = NBackwardOp<AbsOp, 1>;
-
-// impl GradRule<1> for AbsOp {
-//     fn compute_grad(
-//         operands: &[GraphTensor; 1],
-//         in_grad: &GraphTensor
-//     ) -> Vec<Option<GraphTensor>> {
-//         todo!()
-//     }
-// }
-//
-//
-
 #[derive(Debug)]
 pub struct AddOp;
 pub type BackwardAdd = NBackwardOp<AddOp, 2>;
@@ -156,3 +141,37 @@ impl GradRule<2> for PowOp {
         out_grads
     }
 }
+
+#[derive(Debug)]
+pub struct MaximumOp;
+pub type BackwardMaximum = NBackwardOp<MaximumOp, 2>;
+impl GradRule<2> for MaximumOp {
+    fn compute_grad(
+        &self,
+        operands: &[GraphTensor; 2],
+        in_grad: &GraphTensor
+    ) -> Vec<Option<GraphTensor>> {
+        // y = b.powf(e)
+        // dy/db = e * b^(e-1)
+        // dy/de = b^e * ln(b)
+        let a = &operands[0];
+        let b = &operands[1];
+        let mut out_grads = Vec::with_capacity(2);
+
+        out_grads.push(a.requires_grad().then(|| { in_grad * &a.gte(b) }));
+        out_grads.push(b.requires_grad().then(|| { in_grad * &a.lt(b) })); // TODO implement a NOT operator
+
+        out_grads
+    }
+}
+
+// void BackwardMaximum::compute_operands_grad(
+//         const Tensor& out
+// ) {
+//     Tensor& a = m_operands[0];
+//     Tensor& b = m_operands[1];
+//     Tensor a_mask = a > b;
+//     Tensor b_mask = a <= b;
+//     a.accumulate_grad(a_mask * out.grad());
+//     b.accumulate_grad(b_mask * out.grad());
+// }

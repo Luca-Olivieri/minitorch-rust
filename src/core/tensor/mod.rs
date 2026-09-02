@@ -1,5 +1,6 @@
 mod indexing;
 pub mod ops;
+pub mod init;
 
 use std::rc::Rc;
 
@@ -12,7 +13,9 @@ pub struct Tensor<'a> {
 
 pub trait AbstractTensor {
 
-    fn get_node(&self) -> &TensorNode; // TODO return a reference, or some sort of weak pointer?
+    fn get_node(&self) -> &TensorNode;
+
+    fn get_node_mut(&mut self) -> &mut TensorNode;
 
     fn at(&self, md_idx: &Vec<usize>) -> &f64 {
         &self.get_node().storage[md_idx]
@@ -29,15 +32,14 @@ pub trait AbstractTensor {
     fn requires_grad(&self) -> bool {
         self.get_node().requires_grad
     }
-}
 
-fn dist_l2(
-    a: &GraphTensor,
-    b: &GraphTensor,
-) -> f64 {
-    // let diff = a - b;
-    // diff.pow(other)
-    4.0
+    fn set_requires_grad(
+        &mut self,
+        requires_grad: bool
+    ) {
+        let node = self.get_node_mut();
+        node.requires_grad = requires_grad;
+    }
 }
 
 #[derive(Debug)]
@@ -49,6 +51,10 @@ impl AbstractTensor for FreeTensor {
 
     fn get_node(&self) -> &TensorNode {
         &self.node.as_ref()
+    }
+
+    fn get_node_mut(&mut self) -> &mut TensorNode {
+        self.node.as_mut()
     }
 }
 
@@ -104,6 +110,10 @@ impl AbstractTensor for GraphTensor {
 
     fn get_node(&self) -> &TensorNode {
         &self.node.as_ref()
+    }
+
+    fn get_node_mut(&mut self) -> &mut TensorNode {
+        Rc::get_mut(&mut self.node).expect("Failed to obtain mutable reference of GraphTensor with shared ownership.")
     }
 }
 

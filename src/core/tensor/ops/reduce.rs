@@ -19,9 +19,12 @@ impl GraphTensor {
 
         apply_tensor_op(
             |ops: &[&TensorStorage; 1]| TensorStorage::sum_dim(ops[0], dim),
-            |operands: [GraphTensor; 1]| {
-                Box::new(BackwardSumDim{operands: operands, op: SumDimOp { dim, original_times: self.shape()[dim]}}) as Box<dyn GradFnTrait>
-            },
+            Some(|operands: [GraphTensor; 1]| {
+                Box::new(BackwardSumDim {
+                    operands,
+                    op: SumDimOp { dim, original_times: self.shape()[dim] },
+                }) as Box<dyn GradFnTrait>
+            }),
             &[self],
         )
     }

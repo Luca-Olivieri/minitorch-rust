@@ -13,9 +13,9 @@ impl GraphTensor {
 
         apply_tensor_op(
             |ops: &[&TensorStorage; 1]| TensorStorage::copy_d(ops[0]),
-            |operands: [GraphTensor; 1]| {
+            Some(|operands: [GraphTensor; 1]| {
                 Box::new(BackwardCopyD{operands: operands, op: CopyDOp{}}) as Box<dyn GradFnTrait>
-            },
+            }),
             &[self],
         )
     }
@@ -27,9 +27,9 @@ impl GraphTensor {
 
         apply_tensor_op(
             |ops: &[&TensorStorage; 1]| TensorStorage::unsqueeze(ops[0], dim),
-            |operands: [GraphTensor; 1]| {
+            Some(|operands: [GraphTensor; 1]| {
                 Box::new(BackwardUnsqueeze{operands: operands, op: UnsqueezeOp{dim}}) as Box<dyn GradFnTrait>
-            },
+            }),
             &[self],
         )
     }
@@ -41,9 +41,9 @@ impl GraphTensor {
 
         apply_tensor_op(
             |ops: &[&TensorStorage; 1]| TensorStorage::squeeze(ops[0], dim),
-            |operands: [GraphTensor; 1]| {
+            Some(|operands: [GraphTensor; 1]| {
                 Box::new(BackwardSqueeze{operands: operands, op: SqueezeOp{dim}}) as Box<dyn GradFnTrait>
-            },
+            }),
             &[self],
         )
     }
@@ -56,9 +56,9 @@ impl GraphTensor {
 
         apply_tensor_op(
             |ops: &[&TensorStorage; 1]| TensorStorage::expand(ops[0], dim, times),
-            |operands: [GraphTensor; 1]| {
+            Some(|operands: [GraphTensor; 1]| {
                 Box::new(BackwardExpand{operands: operands, op: ExpandOp{dim}}) as Box<dyn GradFnTrait>
-            },
+            }),
             &[self],
         )
     }
