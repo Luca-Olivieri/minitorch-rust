@@ -1,9 +1,10 @@
 mod core;
 mod data;
+mod models;
 
 use core::GraphTensor;
 
-use crate::core::{nn::{activate::ReLU, compute::Linear, module::Forward1}, storage::TensorStorage, tensor::{AbstractTensor, FreeTensor}};
+use crate::{core::{nn::{activate::ReLU, compute::Linear, loss::{CrossEntropyLoss, Loss}, module::{Forward1, Module}, optimizer::{Optimizer, SGD}}, storage::TensorStorage, tensor::{AbstractTensor, FreeTensor}}, models::XORClassifier};
 
 use rand::rngs::StdRng;
 use rand::SeedableRng;
@@ -59,7 +60,80 @@ fn main() {
     // test_one_hot();
     // test_matmul();
 
-    test_linear_relu();
+    // test_linear_relu();
+
+    try_xor();
+}
+
+fn try_xor() {
+    let input_shape = vec![4, 2];
+    let mut inputs_f = FreeTensor::new(input_shape.clone(), 0.0, false);
+    inputs_f.set(&vec![0, 0], 0.0);
+    inputs_f.set(&vec![0, 1], 0.0);
+    inputs_f.set(&vec![1, 0], 0.0);
+    inputs_f.set(&vec![1, 1], 1.0);
+    inputs_f.set(&vec![2, 0], 1.0);
+    inputs_f.set(&vec![2, 1], 0.0);
+    inputs_f.set(&vec![3, 0], 1.0);
+    inputs_f.set(&vec![3, 1], 1.0);
+    let inputs = inputs_f.to_graph();
+
+    let input_shape = vec![4];
+    let mut targets_f = FreeTensor::new(input_shape.clone(), 0.0, true);
+    targets_f.set(&vec![0], 0.0);
+    targets_f.set(&vec![1], 1.0);
+    targets_f.set(&vec![2], 1.0);
+    targets_f.set(&vec![3], 0.0);
+    let targets = targets_f.to_graph();
+
+    let rng = StdRng::seed_from_u64(42);
+
+    let mut model = XORClassifier::new(rng);
+
+    let criterion = CrossEntropyLoss::new();
+
+    let optimizer = SGD::new(0.1);
+
+    let num_epochs = 100;
+
+    dbg!(&model.forward(&inputs).get_node().storage.buffer);
+
+    for epoch in 0..num_epochs {
+
+        let logits = model.forward(&inputs);
+
+        let gts_oh = targets.one_hot(logits.shape()[1]);
+
+        let loss = criterion.forward(&logits, &gts_oh);
+
+        let grads_map = loss.backward(false);
+
+        let d_lin1_w = grads_map.get(&model.lin1.weight.to_key()).unwrap();
+        let d_lin1_b = grads_map.get(&model.lin1.bias.as_ref().unwrap().to_key()).unwrap();
+        let d_lin2_w = grads_map.get(&model.lin2.weight.to_key()).unwrap();
+        let d_lin2_b = grads_map.get(&model.lin2.bias.as_ref().unwrap().to_key()).unwrap();
+        let d_lin3_w = grads_map.get(&model.lin3.weight.to_key()).unwrap();
+        let d_lin3_b = grads_map.get(&model.lin3.bias.as_ref().unwrap().to_key()).unwrap();
+
+        model.lin1.weight = optimizer.step(&model.lin1.weight, d_lin1_w);
+        *model.lin1.bias.as_mut().unwrap() = optimizer.step(&model.lin1.bias.as_ref().unwrap(), d_lin1_b);
+
+        model.lin2.weight = optimizer.step(&model.lin2.weight, d_lin2_w);
+        *model.lin2.bias.as_mut().unwrap() = optimizer.step(&model.lin2.bias.as_ref().unwrap(), d_lin2_b);
+
+        model.lin3.weight = optimizer.step(&model.lin3.weight, d_lin3_w);
+        *model.lin3.bias.as_mut().unwrap() = optimizer.step(&model.lin3.bias.as_ref().unwrap(), d_lin3_b);
+
+        if epoch % 10 == 0 {
+            dbg!(epoch);
+        }
+    }
+
+    let logits = model.forward(&inputs);
+    let gts_oh = targets.one_hot(logits.shape()[1]);
+
+    dbg!(&logits.get_node().storage);
+    dbg!(&gts_oh.get_node().storage);
 }
 
 fn test_complex_operation() {

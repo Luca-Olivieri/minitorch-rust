@@ -1,43 +1,55 @@
+use std::collections::HashMap;
+
 use rand::rngs::StdRng;
 
-use crate::core::{GraphTensor, nn::module::{Forward1, Module, ModuleBase}, tensor::AbstractTensor};
+use crate::core::{GraphTensor, nn::module::{Forward1, Module}, tensor::AbstractTensor};
 
 pub struct Linear {
-    base: ModuleBase,
+    pub weight: GraphTensor,
+    pub bias: Option<GraphTensor>
 }
 
 impl Module for Linear {
-    fn base(&self) -> &ModuleBase { &self.base }
-    fn base_mut(&mut self) -> &mut ModuleBase { &mut self.base }
+
+    fn params(
+        &self
+    ) -> HashMap<String, &GraphTensor> {
+        let mut out_map = HashMap::new();
+        out_map.insert(String::from("weight"), &self.weight);
+        if self.bias.is_none() {
+            out_map.insert(String::from("bias"), self.bias.as_ref().unwrap());
+        }
+
+        out_map
+    }
+
+    fn params_mut(
+        &mut self
+    ) -> HashMap<String, &mut GraphTensor> {
+        let mut out_map = HashMap::new();
+        out_map.insert(String::from("weight"), &mut self.weight);
+        if self.bias.is_none() {
+            out_map.insert(String::from("bias"), self.bias.as_mut().unwrap());
+        }
+
+        out_map
+    }
 }
 
 impl Linear {
-
-    const WEIGHT: &str = "weight";
-    const BIAS: &str = "bias";
-
     pub fn new(
         in_features: usize,
         out_features: usize,
         has_bias: bool,
         rng: StdRng
     ) -> Self {
-
-        let mut base = ModuleBase::new();
-
         // Xavier/Glorot uniform initialization to break symmetry between units
         let w_shape = vec![in_features, out_features];
         let weight = GraphTensor::init_xavier_uniform(w_shape, true, rng); // TODO set rng
 
-        base.parameters.insert(String::from(Self::WEIGHT), weight);
+        let bias = if has_bias { Some(GraphTensor::new(vec![out_features], 0.0, true)) } else { None };
 
-        if has_bias {
-            let b_shape = vec![out_features];
-            let bias = GraphTensor::new(b_shape, 0.0, true);
-            base.parameters.insert(String::from(Self::BIAS), bias);
-        }
-
-        Self { base }
+        Self { weight, bias }
     }
 }
 
@@ -46,14 +58,14 @@ impl Forward1 for Linear {
         &self,
         input: &GraphTensor
     ) -> GraphTensor {
-        let weight = *self.parameters().get(Self::WEIGHT).unwrap();
-        let bias = *self.parameters().get(Self::BIAS).unwrap(); // FIXME crashes if has_bias = false
+        let mult = GraphTensor::matmul(input, &self.weight);
 
-        let mult = GraphTensor::matmul(input, weight);
-
-        match input.shape().len()  {
-           1 => &mult + bias,
-           _ => &mult + &bias.unsqueeze(0).expand(0, input.shape()[0])
+        match &self.bias {
+            None => mult,
+            Some(b) => match input.shape().len()  {
+               1 => &mult + b,
+               _ => &mult + &b.unsqueeze(0).expand(0, input.shape()[0])
+            }
         }
     }
 }

@@ -8,7 +8,7 @@ use std::rc::Rc;
 // TODO make the numbers generic (not tied to f64)
 #[derive(Debug)]
 pub struct TensorStorage {
-    pub(super) buffer: Rc<Vec<f64>>,
+    pub(crate) buffer: Rc<Vec<f64>>,
     pub shape: Vec<usize>,
     pub(super) strides: Vec<usize>,
     pub(super) contiguous: bool,
