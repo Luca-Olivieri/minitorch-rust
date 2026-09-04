@@ -5,6 +5,7 @@ pub mod init;
 use std::rc::Rc;
 
 use crate::core::node::TensorNode;
+use crate::core::storage::TensorStorage;
 
 #[derive(Debug)]
 pub struct Tensor<'a> {
@@ -100,10 +101,15 @@ impl GraphTensor { // turn this impl and the above one in a macro
         Self { node: self.node.clone()}
     }
 
-    // fn norm_lp(&self, p: f64) -> f64 {
-    //     let sp: f64 = self.get_node().storage.flat_data.iter().map(|x| x.powf(p)).sum();
-    //     sp.powf(1.0/p)
-    // }
+    pub fn detach(&self, requires_grad: bool) -> GraphTensor {
+        let node = TensorNode {
+            storage: TensorStorage::copy_d(&self.node.storage),
+            requires_grad,
+            grad_fn: None,
+        };
+
+        Self { node: Rc::new(node) }
+    }
 }
 
 impl AbstractTensor for GraphTensor {

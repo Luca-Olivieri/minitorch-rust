@@ -26,7 +26,7 @@ impl Optimizer for SGD {
         tensor: &GraphTensor,
         grad: &GraphTensor,
     ) -> GraphTensor {
-        tensor - &(grad * self.base_lr)
+        (tensor - &(grad * self.base_lr)).detach(true)
     }
 }
 

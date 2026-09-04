@@ -63,6 +63,18 @@ impl GraphTensor {
         out
     }
 
+    pub fn argmax(
+        &self,
+        dim: usize,
+    ) -> GraphTensor {
+
+        apply_tensor_op(
+            |ops: &[&TensorStorage; 1]| TensorStorage::argmax(ops[0], dim),
+            None::<fn([GraphTensor; 1]) -> Box<dyn GradFnTrait>>,
+            &[self],
+        )
+    }
+
     // TODO should I kep all the logic here or place the TensorStorage part in that class?
     pub fn one_hot(
         &self,

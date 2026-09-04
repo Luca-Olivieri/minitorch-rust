@@ -22,12 +22,12 @@ impl Loss for CrossEntropyLoss {
 
     fn forward(
         &self,
-        preds: &GraphTensor,
+        logits: &GraphTensor,
         targets: &GraphTensor,
     ) -> GraphTensor {
-        let ndim = preds.shape().len();
+        let ndim = logits.shape().len();
         if ndim == 0 {
-            let probs = self.softmax.forward(preds);
+            let probs = self.softmax.forward(logits);
             let logp = probs.ln();
             let loss = -&(targets * &logp);
             return loss.mean_dim(0);
@@ -36,7 +36,7 @@ impl Loss for CrossEntropyLoss {
         let dim = ndim - 1; // cross-entropy over the last dimension;
 
         // compute probabilities via softmax
-        let probs = self.softmax.forward(preds);
+        let probs = self.softmax.forward(logits);
 
         // log probabilities
         let log_probs = probs.ln();

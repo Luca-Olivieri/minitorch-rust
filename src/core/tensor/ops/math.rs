@@ -20,6 +20,19 @@ impl GraphTensor {
     impl_tensor_unary_op!(ln, TensorStorage::ln, BackwardLn, LnOp);
     impl_tensor_binary_op!(pow, TensorStorage::pow, BackwardPow, PowOp);
     impl_tensor_binary_op!(maximum, TensorStorage::maximum, BackwardMaximum, MaximumOp);
+
+    pub fn norm(
+        &self,
+    ) -> f64 {
+        let twos = GraphTensor::new(self.shape().clone(), 2.0, false);
+        self.pow(&twos).sum().item().sqrt()
+    }
+    pub fn dist(
+        a: &GraphTensor,
+        b: &GraphTensor,
+    ) -> f64 {
+        (a-b).norm()
+    }
 }
 
 impl_tensor_binary_ops! {

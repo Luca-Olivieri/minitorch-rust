@@ -119,7 +119,7 @@ fn topological_backprop(
 
         if let Some(grad_fn) = &u.node.grad_fn {
             let in_grad = grads_map.get(&u).unwrap();
-            let ops_grad = grad_fn.compute_operands_grad(in_grad);
+            let ops_grad = grad_fn.compute_operands_grad(in_grad, retain_graph);
 
             for (op, op_grad_opt) in grad_fn.get_operands().iter().zip(ops_grad.iter()) {
 

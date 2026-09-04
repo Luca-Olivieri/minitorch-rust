@@ -1,4 +1,4 @@
-use crate::core::GraphTensor;
+use crate::core::{GraphTensor, tensor::AbstractTensor};
 use std::fmt::Debug;
 
 /// Generic backward-op container: stores operands, arity N, and the operation state.
@@ -16,7 +16,11 @@ pub trait HasOperands {
 }
 
 pub trait ComputesGrads {
-    fn compute_operands_grad(&self, in_grad: &GraphTensor) -> Vec<Option<GraphTensor>>;
+    fn compute_operands_grad(
+        &self,
+        in_grad: &GraphTensor,
+        retain_graph: bool
+    ) -> Vec<Option<GraphTensor>>;
 }
 
 impl<Op, const N: usize> HasOperands for NBackwardOp<Op, N> {
@@ -36,8 +40,20 @@ pub trait GradRule<const N: usize> {
 }
 
 impl<Op: GradRule<N>, const N: usize> ComputesGrads for NBackwardOp<Op, N> {
-    fn compute_operands_grad(&self, in_grad: &GraphTensor) -> Vec<Option<GraphTensor>> {
+    fn compute_operands_grad(
+        &self,
+        in_grad: &GraphTensor,
+        retain_graph: bool
+    ) -> Vec<Option<GraphTensor>> {
         // Call it as a method on `self.op`
-        self.op.compute_grad(&self.operands, in_grad)
+        let mut grads = self.op.compute_grad(&self.operands, in_grad);
+
+        for grad in grads.iter_mut() {
+            if !retain_graph && let Some(g) = grad {
+                g.get_node_mut().grad_fn = None;
+            }
+        }
+
+        grads
     }
 }

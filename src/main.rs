@@ -3,8 +3,9 @@ mod data;
 mod models;
 
 use core::GraphTensor;
+use std::time::Instant;
 
-use crate::{core::{nn::{activate::ReLU, compute::Linear, loss::{CrossEntropyLoss, Loss}, module::{Forward1, Module}, optimizer::{Optimizer, SGD}}, storage::TensorStorage, tensor::{AbstractTensor, FreeTensor}}, models::XORClassifier};
+use crate::{core::{nn::{activate::{ReLU, Softmax}, compute::Linear, loss::{CrossEntropyLoss, Loss}, module::{Forward1, Module}, optimizer::{Optimizer, SGD}}, storage::TensorStorage, tensor::{AbstractTensor, FreeTensor}}, models::XORClassifier};
 
 use rand::rngs::StdRng;
 use rand::SeedableRng;
@@ -96,17 +97,25 @@ fn try_xor() {
 
     let num_epochs = 100;
 
-    dbg!(&model.forward(&inputs).get_node().storage.buffer);
+    let softmax = Softmax::new();
+
+    println!("{}", &model.forward(&inputs).get_node().storage);
 
     for epoch in 0..num_epochs {
 
+        let start = Instant::now();
         let logits = model.forward(&inputs);
+        let forward_time = start.elapsed();
 
         let gts_oh = targets.one_hot(logits.shape()[1]);
 
+        let start = Instant::now();
         let loss = criterion.forward(&logits, &gts_oh);
+        let loss_time = start.elapsed();
 
+        let start = Instant::now();
         let grads_map = loss.backward(false);
+        let backward_time = start.elapsed();
 
         let d_lin1_w = grads_map.get(&model.lin1.weight.to_key()).unwrap();
         let d_lin1_b = grads_map.get(&model.lin1.bias.as_ref().unwrap().to_key()).unwrap();
@@ -115,6 +124,7 @@ fn try_xor() {
         let d_lin3_w = grads_map.get(&model.lin3.weight.to_key()).unwrap();
         let d_lin3_b = grads_map.get(&model.lin3.bias.as_ref().unwrap().to_key()).unwrap();
 
+        let start = Instant::now();
         model.lin1.weight = optimizer.step(&model.lin1.weight, d_lin1_w);
         *model.lin1.bias.as_mut().unwrap() = optimizer.step(&model.lin1.bias.as_ref().unwrap(), d_lin1_b);
 
@@ -123,17 +133,22 @@ fn try_xor() {
 
         model.lin3.weight = optimizer.step(&model.lin3.weight, d_lin3_w);
         *model.lin3.bias.as_mut().unwrap() = optimizer.step(&model.lin3.bias.as_ref().unwrap(), d_lin3_b);
+        let step_time = start.elapsed();
 
         if epoch % 10 == 0 {
-            dbg!(epoch);
+            let prs = softmax.forward(&logits);
+            println!("=== [EPOCH {epoch}] === ");
+            dbg!(forward_time, loss_time, backward_time, step_time, GraphTensor::dist(&prs, &gts_oh), grads_map.len());
         }
     }
 
     let logits = model.forward(&inputs);
     let gts_oh = targets.one_hot(logits.shape()[1]);
 
-    dbg!(&logits.get_node().storage);
-    dbg!(&gts_oh.get_node().storage);
+    println!("{}", &logits.argmax(1).get_node().storage);
+    println!("{}", &gts_oh.argmax(1).get_node().storage);
+
+
 }
 
 fn test_complex_operation() {
