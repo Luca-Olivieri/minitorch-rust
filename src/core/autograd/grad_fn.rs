@@ -48,6 +48,12 @@ impl<Op: GradRule<N>, const N: usize> ComputesGrads for NBackwardOp<Op, N> {
         // Call it as a method on `self.op`
         let mut grads = self.op.compute_grad(&self.operands, in_grad);
 
+        for grad in grads.iter_mut() {
+            if !retain_graph && let Some(g) = grad {
+                g.get_node_mut().grad_fn = None;
+            }
+        }
+
         grads
     }
 }
