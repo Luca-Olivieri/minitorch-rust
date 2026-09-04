@@ -19,7 +19,7 @@ pub trait ComputesGrads {
     fn compute_operands_grad(
         &self,
         in_grad: &GraphTensor,
-        retain_graph: bool
+        retain_graph: bool,
     ) -> Vec<Option<GraphTensor>>;
 }
 
@@ -43,7 +43,7 @@ impl<Op: GradRule<N>, const N: usize> ComputesGrads for NBackwardOp<Op, N> {
     fn compute_operands_grad(
         &self,
         in_grad: &GraphTensor,
-        retain_graph: bool
+        retain_graph: bool,
     ) -> Vec<Option<GraphTensor>> {
         // Call it as a method on `self.op`
         let mut grads = self.op.compute_grad(&self.operands, in_grad);
