@@ -14,6 +14,17 @@ impl TensorStorage {
         }
     }
 
+    pub fn copy_s(a: &TensorStorage) -> TensorStorage {
+        TensorStorage {
+            buffer: Rc::clone(&a.buffer),
+            shape: a.shape.clone(),
+            strides: a.strides.clone(),
+            contiguous: a.contiguous,
+            numel: a.numel,
+            offset: a.offset
+        }
+    }
+
     pub fn unsqueeze(
         a: &TensorStorage,
         dim: usize

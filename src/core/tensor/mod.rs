@@ -103,7 +103,7 @@ impl GraphTensor { // turn this impl and the above one in a macro
 
     pub fn detach(&self, requires_grad: bool) -> GraphTensor {
         let node = TensorNode {
-            storage: TensorStorage::copy_d(&self.node.storage),
+            storage: TensorStorage::copy_s(&self.node.storage),
             requires_grad,
             grad_fn: None,
         };
