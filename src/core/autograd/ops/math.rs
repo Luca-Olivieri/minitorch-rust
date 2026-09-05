@@ -29,6 +29,8 @@ impl GradRule<1> for LnOp {
         let a = &operands[0];
         let mut out_grads = Vec::with_capacity(1);
 
+        // TODO should do inplace operations if retain_graph = False
+
         out_grads.push(a.requires_grad().then(|| {
             in_grad / a
         }));

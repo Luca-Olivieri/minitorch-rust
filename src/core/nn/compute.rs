@@ -34,6 +34,16 @@ impl Module for Linear {
 
         out_map
     }
+
+    fn parts_mut(&mut self) -> (HashMap<String, &mut GraphTensor>, HashMap<String, &mut dyn Module>) {
+        let mut out_params_map = HashMap::new();
+        out_params_map.insert(String::from("weight"), &mut self.weight);
+        if self.bias.is_some() {
+            out_params_map.insert(String::from("bias"), self.bias.as_mut().unwrap());
+        }
+
+        (out_params_map, HashMap::new())
+    }
 }
 
 impl Linear {

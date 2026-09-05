@@ -101,6 +101,7 @@ fn try_xor() {
 
     println!("{}", &model.forward(&inputs).get_node().storage);
 
+
     for epoch in 0..num_epochs {
 
         let start = Instant::now();
@@ -117,22 +118,12 @@ fn try_xor() {
         let grads_map = loss.backward(false);
         let backward_time = start.elapsed();
 
-        let d_lin1_w = grads_map.get(&model.lin1.weight.to_key()).unwrap();
-        let d_lin1_b = grads_map.get(&model.lin1.bias.as_ref().unwrap().to_key()).unwrap();
-        let d_lin2_w = grads_map.get(&model.lin2.weight.to_key()).unwrap();
-        let d_lin2_b = grads_map.get(&model.lin2.bias.as_ref().unwrap().to_key()).unwrap();
-        let d_lin3_w = grads_map.get(&model.lin3.weight.to_key()).unwrap();
-        let d_lin3_b = grads_map.get(&model.lin3.bias.as_ref().unwrap().to_key()).unwrap();
-
         let start = Instant::now();
-        model.lin1.weight = optimizer.step(&model.lin1.weight, d_lin1_w);
-        *model.lin1.bias.as_mut().unwrap() = optimizer.step(&model.lin1.bias.as_ref().unwrap(), d_lin1_b);
 
-        model.lin2.weight = optimizer.step(&model.lin2.weight, d_lin2_w);
-        *model.lin2.bias.as_mut().unwrap() = optimizer.step(&model.lin2.bias.as_ref().unwrap(), d_lin2_b);
+        let params = model.all_params_mut();
 
-        model.lin3.weight = optimizer.step(&model.lin3.weight, d_lin3_w);
-        *model.lin3.bias.as_mut().unwrap() = optimizer.step(&model.lin3.bias.as_ref().unwrap(), d_lin3_b);
+        optimizer.step(params, &grads_map);
+
         let step_time = start.elapsed();
 
         if epoch % 10 == 0 {

@@ -1,12 +1,14 @@
-use crate::core::{GraphTensor};
+use std::collections::HashMap;
+
+use crate::core::{GraphTensor, autograd::TensorKey};
 
 pub trait Optimizer {
 
     fn step(
         &self,
-        tensor: &GraphTensor,
-        grad: &GraphTensor,
-    ) -> GraphTensor;
+        params: HashMap<String, &mut GraphTensor>,
+        grads_map: &HashMap<TensorKey, GraphTensor>
+    );
 }
 
 pub struct SGD {
@@ -23,17 +25,14 @@ impl Optimizer for SGD {
 
     fn step(
         &self,
-        tensor: &GraphTensor,
-        grad: &GraphTensor,
-    ) -> GraphTensor {
-        (tensor - &(grad * self.base_lr)).detach(true)
+        params: HashMap<String, &mut GraphTensor>,
+        grads_map: &HashMap<TensorKey, GraphTensor>
+    ) {
+        for param in params.into_values() {
+            if let Some(g) = grads_map.get(&param.to_key()) {
+                let delta = &(g * self.base_lr);
+                *param = (&*param - delta).detach(true);
+            }
+        }
     }
 }
-
-// void Optimizer::zero_grad() {
-//     for (auto& [name, tensor] : m_parameters) {
-//         if (tensor.m_node->m_grad) {
-//             tensor.reset_grad();
-//         }
-//     }
-// }
