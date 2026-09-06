@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use crate::core::storage::TensorStorage;
 use crate::core::storage::ops::shape::squeeze_shape;
 
@@ -21,128 +19,78 @@ impl TensorStorage {
         a: &TensorStorage,
         dim: usize
     ) -> TensorStorage {
-        if dim >= a.shape.len() {
-            panic!("Reduction dimension {} out of range for shape {:?}.", dim, a.shape);
-        }
-
-         // build output shape
-        let out_shape = squeeze_shape(&a.shape, dim);
-
-        let mut out = TensorStorage::new(out_shape, 0.0);
-
-        // `out` is freshly allocated, so its Rc is unique and mutable.
-        let out_buf = Rc::get_mut(&mut out.buffer).unwrap();
-        let a_buf = &a.buffer;
-
-        // consecutive elements along the reduced dim are `reduced_stride` apart in flat space
-        let reduced_stride = a.strides[dim];
-        let bases = base_offsets(a, dim);
-
-        // iterate over output logical indices
-        for out_i in 0..out.numel {
-            let mut acc = 0.0;
-            let mut f = bases[out_i];
-            for _ in 0..a.shape[dim] {
-                acc += a_buf[f];
-                f += reduced_stride;
-            }
-
-            out_buf[out_i] = acc;
-        }
-
-        out
+        reduce_dim(a, dim, |v| v, |acc, v| acc + v, |acc| acc)
     }
 
     pub fn max_dim(
         a: &TensorStorage,
         dim: usize
     ) -> TensorStorage {
-        if dim >= a.shape.len() {
-            panic!("Reduction dimension {} out of range for shape {:?}.", dim, a.shape);
-        }
-
-         // build output shape
-        let out_shape = squeeze_shape(&a.shape, dim);
-
-        let mut out = TensorStorage::new(out_shape, 0.0);
-
-        let out_buf = Rc::get_mut(&mut out.buffer).unwrap();
-        let a_buf = &a.buffer;
-
-        // consecutive elements along the reduced dim are `reduced_stride` apart in flat space
-        let reduced_stride = a.strides[dim];
-        let bases = base_offsets(a, dim);
-
-        // iterate over output logical indices
-        for out_i in 0..out.numel {
-            // initialize max tracking with the first element along the dimension
-            let mut f = bases[out_i];
-            let mut max_val = a_buf[f];
-
-            // iterate through the remaining elements in the dimension
-            for _ in 1..a.shape[dim] {
-                f += reduced_stride;
-                let val = a_buf[f];
-
-                if val > max_val {
-                    max_val = val;
-                }
-            }
-
-            out_buf[out_i] = max_val;
-        }
-
-        out
+        reduce_dim(a, dim, |v| v, |acc, v| if v > acc { v } else { acc }, |acc| acc)
     }
 
     pub fn argmax(
         a: &TensorStorage,
         dim: usize
     ) -> TensorStorage {
-        if dim >= a.shape.len() {
-            panic!("Reduction dimension {} out of range for shape {:?}.", dim, a.shape);
-        }
-
-        if a.shape[dim] == 0 {
-            panic!("Cannot perform argmax on an empty dimension.");
-        }
-
-        // build output shape
-        let out_shape = squeeze_shape(&a.shape, dim);
-
-        let mut out = TensorStorage::new(out_shape, 0.0);
-
-        let out_buf = Rc::get_mut(&mut out.buffer).unwrap();
-        let a_buf = &a.buffer;
-
-        // consecutive elements along the reduced dim are `reduced_stride` apart in flat space
-        let reduced_stride = a.strides[dim];
-        let bases = base_offsets(a, dim);
-
-        // iterate over output logical indices
-        for out_i in 0..out.numel {
-            // initialize max tracking with the first element along the dimension
-            let mut f = bases[out_i];
-            let mut max_val = a_buf[f];
-            let mut max_idx = 0;
-
-            // iterate through the remaining elements in the dimension
-            for r in 1..a.shape[dim] {
-                f += reduced_stride;
-                let val = a_buf[f];
-
-                if val > max_val {
-                    max_val = val;
-                    max_idx = r;
-                }
-            }
-
-            // store the index as a float (assuming TensorStorage holds floats)
-            out_buf[out_i] = max_idx as f64;
-        }
-
-        out
+        reduce_dim(
+            a,
+            dim,
+            |v| (v, 0usize),
+            |(v, i), val| if val > v { (val, i + 1) } else { (v, i) },
+            |(_, i)| i as f64,
+        )
     }
+}
+
+/// Shared single-dimension reduction.
+///
+/// Visits every output slice (the shape without `dim`, in row-major order), seeds an
+/// accumulator `A` with the first element along `dim`, folds the remaining elements
+/// with `fold`, and writes `finish(acc)` to the corresponding output slot. The inner
+/// loop is a flat-buffer `acc = fold(acc, next)` walk, so per-slice logic just
+/// describes how to combine values.
+fn reduce_dim<A, F, G>(
+    a: &TensorStorage,
+    dim: usize,
+    seed: impl Fn(f64) -> A,
+    fold: F,
+    finish: G,
+) -> TensorStorage
+where
+    F: Fn(A, f64) -> A,
+    G: Fn(A) -> f64,
+{
+    if dim >= a.shape.len() {
+        panic!("Reduction dimension {} out of range for shape {:?}.", dim, a.shape);
+    }
+
+    // build output shape
+    let out_shape = squeeze_shape(&a.shape, dim);
+
+    let mut out = TensorStorage::new(out_shape, 0.0);
+
+    let out_numel = out.numel;
+    let out_buf = out.buffer_mut();
+    let a_buf = &a.buffer;
+
+    // consecutive elements along the reduced dim are `reduced_stride` apart in flat space
+    let reduced_stride = a.strides[dim];
+    let bases = base_offsets(a, dim);
+
+    // iterate over output logical indices
+    for out_i in 0..out_numel {
+        let mut f = bases[out_i];
+        let mut acc = seed(a_buf[f]);
+        for _ in 1..a.shape[dim] {
+            f += reduced_stride;
+            acc = fold(acc, a_buf[f]);
+        }
+
+        out_buf[out_i] = finish(acc);
+    }
+
+    out
 }
 
 /// Flat offset of the first element of each slice along `dim`, walked in output

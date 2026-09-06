@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use crate::core::storage::TensorStorage;
 
 impl TensorStorage {
@@ -49,7 +47,7 @@ impl TensorStorage {
         let mut out = TensorStorage::new(vec![m, n], 0.0);
 
         // `out` is freshly allocated, so its Rc is unique and mutable.
-        let out_buf = Rc::get_mut(&mut out.buffer).unwrap();
+        let out_buf = out.buffer_mut();
         let a_buf = &a.buffer;
         let b_buf = &b.buffer;
 

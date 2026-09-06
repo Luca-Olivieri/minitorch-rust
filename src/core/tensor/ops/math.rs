@@ -10,7 +10,7 @@ use std::ops::{
 use crate::core::tensor::{AbstractTensor, GraphTensor};
 use crate::core::node::TensorNode;
 use crate::core::storage::TensorStorage;
-use crate::core::autograd::grad_fn::{self, GradFnTrait};
+use crate::core::autograd::grad_fn::GradFnTrait;
 use crate::core::tensor::extract_requires_grad;
 use crate::core::autograd::ops::math::{
     AddOp, BackwardAdd, BackwardDiv, BackwardExp, BackwardLn, BackwardMaximum, BackwardMul, BackwardNeg, BackwardPow, BackwardSub, DivOp, ExpOp, LnOp, MaximumOp, MulOp, NegOp, PowOp, SubOp
@@ -77,14 +77,11 @@ where
     let storages: [&TensorStorage; N] = std::array::from_fn(|i| &operands[i].node.storage);
     let out_store = op(&storages);
 
-    // Only copy operands and generate grad_fn_box if a grad_fn was provided
-    let grad_fn_opt = match &grad_fn {
-        None => None,
-        Some(g_fn) => grad_fn.map(|g| {
-            let new_operands: [GraphTensor; N] = std::array::from_fn(|i| operands[i].copy_s());
-            g(new_operands)
-        }),
-    };
+    // Only generate a grad_fn if one was provided
+    let grad_fn_opt = grad_fn.map(|g| {
+        let new_operands: [GraphTensor; N] = std::array::from_fn(|i| operands[i].copy_s());
+        g(new_operands)
+    });
 
     let out_node = TensorNode {
         storage: out_store,

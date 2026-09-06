@@ -69,6 +69,16 @@ impl TensorStorage {
         }
     }
 
+    /// Mutable access to the underlying buffer.
+    ///
+    /// Panics if the buffer is not uniquely owned (i.e. it is still shared with
+    /// another view), since mutating it in place would corrupt sibling views.
+    /// Freshly allocated storages and detached copies are always uniquely owned.
+    pub(super) fn buffer_mut(&mut self) -> &mut Vec<f64> {
+        Rc::get_mut(&mut self.buffer)
+            .expect("Cannot mutate a buffer that is still shared by multiple storage views.")
+    }
+
     fn check_contiguity(&self) -> bool {
         let contiguous_strides = init_strides(&self.shape);
 

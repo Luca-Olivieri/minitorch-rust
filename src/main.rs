@@ -5,7 +5,7 @@ mod models;
 use core::GraphTensor;
 use std::time::Instant;
 
-use crate::{core::{nn::{activate::{ReLU, Softmax}, compute::Linear, loss::{CrossEntropyLoss, Loss}, module::{Forward1, Module}, optimizer::{Optimizer, SGD}}, storage::TensorStorage, tensor::{AbstractTensor, FreeTensor}}, models::XORClassifier};
+use crate::{core::{nn::{activate::{ReLU, Softmax}, compute::Linear, loss::{CrossEntropyLoss, Loss}, module::{Forward1, Module}, optimizer::{Optimizer, SGD}}, tensor::{AbstractTensor, FreeTensor}}, models::XORClassifier};
 
 use rand::rngs::StdRng;
 use rand::SeedableRng;
@@ -274,7 +274,7 @@ fn test_shapes() {
     let de = grads_map.get(&e.to_key()).unwrap();
     dbg!(&de.get_node().storage);
 
-    let da_grads_map = da.backward(true);
+    let _da_grads_map = da.backward(true);
 
     // println!( "========== da.grad =========");
     // if let Some(d2a_da) = da_grads_map.get(&a.to_key()) {

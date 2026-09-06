@@ -3,12 +3,12 @@ use std::{ops::{Index, IndexMut}, rc::Rc};
 
 impl TensorStorage {
 
-    /// Add `other`'s values into `self`'s buffer elementwise, in place.
+    /// Try to add `other`'s values into `self`'s buffer elementwise, in place.
     ///
     /// Returns `false` (without mutating anything) when the accumulation cannot be
     /// done safely in place: shape mismatch, `self` is a strided view, or the buffer
     /// is not uniquely owned. Callers should fall back to an allocating `a + b`.
-    pub(crate) fn add_assign(&mut self, other: &TensorStorage) -> bool {
+    pub(crate) fn try_add_assign(&mut self, other: &TensorStorage) -> bool {
         if self.shape != other.shape || self.numel != other.numel {
             return false;
         }
@@ -107,9 +107,7 @@ impl IndexMut<&Vec<usize>> for TensorStorage {
         md_idx: &Vec<usize>
     ) -> &mut f64 {
         let f_idx = self.md_to_flat(md_idx);
-        let mut_rc = &mut self.buffer;
-        let mut_vec = Rc::get_mut(mut_rc).unwrap();
-        &mut mut_vec[f_idx]
+        &mut self.buffer_mut()[f_idx]
     }
 }
 
@@ -119,8 +117,6 @@ impl IndexMut<usize> for TensorStorage {
         i: usize
     ) -> &mut f64 {
         let f_idx = self.logic_to_flat(i);
-        let mut_rc = &mut self.buffer;
-        let mut_vec = Rc::get_mut(mut_rc).unwrap();
-        &mut mut_vec[f_idx]
+        &mut self.buffer_mut()[f_idx]
     }
 }

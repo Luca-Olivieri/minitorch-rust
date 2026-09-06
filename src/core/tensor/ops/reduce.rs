@@ -104,7 +104,7 @@ impl GraphTensor {
         let mut out_storage = TensorStorage::new(out_shape, 0.0); // TODO see if you can have this uninit
 
         // `out_storage` is freshly allocated, so its Rc is unique and mutable.
-        let out_buf = Rc::get_mut(&mut out_storage.buffer).unwrap();
+        let out_buf = out_storage.buffer_mut();
 
         // The output is contiguous with the input coords followed by the class dim,
         // so the flat output index of (input logical index i, class cls) is i*num_classes + cls.

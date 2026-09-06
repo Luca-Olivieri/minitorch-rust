@@ -7,13 +7,10 @@ use std::rc::Rc;
 
 use crate::core::GraphTensor;
 use crate::core::node::TensorNode;
-use crate::core::tensor::AbstractTensor;
 
 pub struct TensorKey {
     node: Rc<TensorNode> // TODO or use GraphTensor directly
 }
-
-impl TensorKey {}
 
 impl Clone for TensorKey {
     fn clone(&self) -> Self {
@@ -48,10 +45,6 @@ impl GraphTensor {
         &self,
         retain_graph: bool
     ) -> HashMap<TensorKey, GraphTensor> {
-        if !self.requires_grad() {
-            panic!("Cannot call backward() on tensor with requires_grad=False. Likely, the graph has no leaf nodes requiring gradients.")
-        }
-
         self.compile_backward().run(retain_graph)
     }
 
@@ -152,6 +145,11 @@ impl BackwardPlan {
 
     /// Execute the compiled backward pass from the seed this plan was built for.
     pub fn run(&mut self, retain_graph: bool) -> HashMap<TensorKey, GraphTensor> {
+        assert!(
+            self.nodes[self.seed_idx].node.requires_grad,
+            "Cannot run backward() on a tensor with requires_grad=False. Likely, the graph has no leaf nodes requiring gradients."
+        );
+
         let mut in_degree = self.base_in_degree.clone();
         for grad in self.grads.iter_mut() {
             *grad = None;
@@ -186,28 +184,7 @@ impl BackwardPlan {
 
                 if let Some(op_grad) = op_grad_opt {
                     if self.grads[v].is_some() {
-                        if retain_graph {
-                            // Higher-order path: preserve the additive structure of the
-                            // accumulated gradient so that recomputing its derivative is
-                            // still possible. The summing step is an explicit graph node.
-                            let a = self.grads[v].as_ref().unwrap();
-                            let sum = a + op_grad;
-                            self.grads[v] = Some(sum);
-                        } else {
-                            // First-order path: fuse the new contribution into the existing
-                            // gradient buffer in place, skipping the allocation and the
-                            // graph node entirely. Fall back to the allocating sum when the
-                            // buffer cannot be mutated (shared/aliased or strided).
-                            let fused = match self.grads.get_mut(v).and_then(|g| g.as_mut()) {
-                                Some(a) => accumulate_inplace(a, op_grad),
-                                None => false,
-                            };
-                            if !fused {
-                                let a = self.grads[v].as_ref().unwrap();
-                                let sum = a + op_grad;
-                                self.grads[v] = Some(sum);
-                            }
-                        }
+                        accumulate_grad(&mut self.grads, v, op_grad, retain_graph);
                     } else {
                         self.grads[v] = Some(op_grad.copy_s());
                     }
@@ -227,18 +204,10 @@ impl BackwardPlan {
         // First-order path: keep only leaf tensors; higher-order callers keep every
         // gradient so they can fetch intermediates.
         let mut grads_map = HashMap::new();
-        if retain_graph {
-            for (i, grad) in self.grads.iter_mut().enumerate() {
+        for (i, grad) in self.grads.iter_mut().enumerate() {
+            if retain_graph || self.is_leaf[i] {
                 if let Some(g) = grad.take() {
                     grads_map.insert(self.nodes[i].clone(), g);
-                }
-            }
-        } else {
-            for (i, grad) in self.grads.iter_mut().enumerate() {
-                if self.is_leaf[i] {
-                    if let Some(g) = grad.take() {
-                        grads_map.insert(self.nodes[i].clone(), g);
-                    }
                 }
             }
         }
@@ -247,18 +216,46 @@ impl BackwardPlan {
     }
 }
 
-/// Mutate `a`'s buffer in place by adding `b`'s values. Returns `false` without
-/// touching anything when the node or its buffer is not uniquely owned or the
-/// storage cannot be mutated, in which case the caller falls back to `a + b`.
+/// Merge `op_grad` into the gradient accumulated so far for node `v`.
+///
+/// Higher-order path: keep the additive structure of the accumulated gradient so
+/// that recomputing its derivative is still possible. The summing step is an
+/// explicit graph node.
+///
+/// First-order path: fuse the new contribution into the existing gradient buffer
+/// in place, skipping the allocation and the graph node entirely. Fall back to
+/// the allocating sum when the buffer cannot be mutated (shared/aliased or
+/// strided).
+fn accumulate_grad(grads: &mut Vec<Option<GraphTensor>>, v: usize, op_grad: &GraphTensor, retain_graph: bool) {
+    if retain_graph {
+        let a = grads[v].as_ref().unwrap();
+        let sum = a + op_grad;
+        grads[v] = Some(sum);
+    } else {
+        let fused = match grads.get_mut(v).and_then(|g| g.as_mut()) {
+            Some(a) => try_accumulate_inplace(a, op_grad),
+            None => false,
+        };
+        if !fused {
+            let a = grads[v].as_ref().unwrap();
+            let sum = a + op_grad;
+            grads[v] = Some(sum);
+        }
+    }
+}
+
+/// Try to mutate `a`'s buffer in place by adding `b`'s values. Returns `false`
+/// without touching anything when the node or its buffer is not uniquely owned or
+/// the storage cannot be mutated, in which case the caller falls back to `a + b`.
 ///
 /// This destroys `a`'s pre-sum graph structure, so it is only used on the
 /// first-order (retain_graph = False) path.
-fn accumulate_inplace(a: &mut GraphTensor, b: &GraphTensor) -> bool {
+fn try_accumulate_inplace(a: &mut GraphTensor, b: &GraphTensor) -> bool {
     let Some(node) = Rc::get_mut(&mut a.node) else {
         return false;
     };
 
-    if !node.storage.add_assign(&b.node.storage) {
+    if !node.storage.try_add_assign(&b.node.storage) {
         return false;
     }
 
