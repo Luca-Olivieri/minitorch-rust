@@ -1,7 +1,7 @@
 pub mod ops;
 pub mod grad_fn;
 
-use std::collections::{HashMap, VecDeque, HashSet};
+use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
@@ -52,141 +52,199 @@ impl GraphTensor {
             panic!("Cannot call backward() on tensor with requires_grad=False. Likely, the graph has no leaf nodes requiring gradients.")
         }
 
-        let grads_map = topological_backprop(self.copy_s(), retain_graph);
-        grads_map
+        self.compile_backward().run(retain_graph)
+    }
+
+    /// Precompile the backward schedule for the graph reachable from `self`.
+    ///
+    /// The returned plan owns `Rc` handles to every node of the forward graph, so it
+    /// stays valid as long as the graph is alive and can be re-executed any number of
+    /// times (e.g. with different `retain_graph` flags), reusing the compiled
+    /// topological schedule and the gradient/scratch buffers across runs.
+    pub fn compile_backward(&self) -> BackwardPlan {
+        BackwardPlan::build(self)
     }
 }
 
-/// Returns (in-degree map, set of leaf tensors reachable from the seed).
+/// A fully compiled backward schedule for a fixed forward graph.
 ///
-/// A tensor is a leaf when it has no associated backward function (i.e. it was not
-/// produced by an operation). Leaves are captured *before* any gradient computation
-/// strips `grad_fn` from intermediate nodes, so they identify true parameters/inputs.
-fn compute_in_degree(seed: GraphTensor) -> (HashMap<TensorKey, u64>, HashSet<TensorKey>) { // TODO should seed be owned?
-    let mut in_degree: HashMap<TensorKey, u64> = HashMap::new();
-    let mut bfs_queue: VecDeque<TensorKey> = VecDeque::new();
-    let mut visited: HashSet<TensorKey> = HashSet::new();
-    let mut is_leaf: HashSet<TensorKey> = HashSet::new();
+/// Nodes are assigned dense integer indices once at build time; subsequent runs are
+/// pure integer/Vec operations (no hashing, no per-node key churn, no per-node
+/// scratch allocations) until the final leaf-gradient map is materialized.
+pub struct BackwardPlan {
+    nodes: Vec<TensorKey>,
+    seed_idx: usize,
+    operands: Vec<Vec<usize>>,
+    is_leaf: Vec<bool>,
+    base_in_degree: Vec<usize>,
+    grads: Vec<Option<GraphTensor>>,
+    scratch: Vec<Option<GraphTensor>>,
+}
 
-    // TODO should all this methods create owning TensorKey?
+impl BackwardPlan {
+    /// Walk the forward graph once, assigning each reachable, requires-grad node a
+    /// dense index and recording its operand indices, leaf-ness, and in-degree.
+    fn build(seed: &GraphTensor) -> BackwardPlan {
+        let mut nodes: Vec<TensorKey> = Vec::new();
+        let mut index_of: HashMap<*const TensorNode, usize> = HashMap::new();
+        let mut operands: Vec<Vec<usize>> = Vec::new();
+        let mut is_leaf: Vec<bool> = Vec::new();
+        let mut bfs_queue: VecDeque<usize> = VecDeque::new();
 
-    let seed_key = seed.to_key();
-    bfs_queue.push_back(seed_key.clone()); // TODO I can use the into() or cast() method for automatic conversion to TensorKey
-    visited.insert(seed_key.clone());
-    in_degree.insert(seed_key.clone(), 0);
+        let seed_idx = 0usize;
+        nodes.push(seed.to_key());
+        index_of.insert(Rc::as_ptr(&seed.node), seed_idx);
+        operands.push(Vec::new());
+        is_leaf.push(seed.node.grad_fn.is_none());
+        bfs_queue.push_back(seed_idx);
 
-    while let Some(u) = bfs_queue.pop_front() {
+        while let Some(u) = bfs_queue.pop_front() {
 
-        // do not propagate through nodes that do not require gradients.
-        if !u.node.requires_grad {
-            continue;
-        }
+            // do not propagate through nodes that do not require gradients.
+            if !nodes[u].node.requires_grad {
+                continue;
+            }
 
-        if u.node.grad_fn.is_none() {
-            is_leaf.insert(u.clone());
-        }
+            // Snapshot the operand graph tensors so `nodes` can grow while iterating.
+            let op_graphs = {
+                let Some(grad_fn) = &nodes[u].node.grad_fn else {
+                    continue;
+                };
+                grad_fn.get_operands().iter().map(|op| op.copy_s()).collect::<Vec<_>>()
+            };
 
-        if let Some(grad_fn) = &u.node.grad_fn {
-            let operands = grad_fn.get_operands();
-
-            for op in operands {
-                let op_key = op.to_key();
-                *in_degree.entry(op_key.clone()).or_insert(0) += 1;
-                if visited.insert(op_key.clone()) {
-                    bfs_queue.push_back(op_key.clone());
-                }
+            for op in op_graphs.iter() {
+                let ptr = Rc::as_ptr(&op.node);
+                let v = match index_of.get(&ptr) {
+                    Some(&v) => v,
+                    None => {
+                        let v = nodes.len();
+                        nodes.push(op.to_key());
+                        index_of.insert(ptr, v);
+                        operands.push(Vec::new());
+                        is_leaf.push(op.node.grad_fn.is_none());
+                        bfs_queue.push_back(v);
+                        v
+                    }
+                };
+                operands[u].push(v);
             }
         }
-    }
 
-    (in_degree, is_leaf)
-}
-
-fn topological_backprop(
-    seed: GraphTensor, // TODO should seed be owned?
-    retain_graph: bool
-) -> HashMap<TensorKey, GraphTensor> {
-
-    let (mut in_degree, is_leaf) = compute_in_degree(seed.copy_s());
-
-    let mut grads_map: HashMap<TensorKey, GraphTensor> = HashMap::new();
-
-    // NOTE: if 'retain_graph' = True, the gradient tensors have 'requires_grad = True'
-    //       otherwise, you cannot compute higher-order derivatives
-
-    let seed_grad = GraphTensor::new(seed.shape().clone(), 1.0, retain_graph); // TODO change requires_grad for higher order derivates
-    grads_map.insert(seed.to_key(), seed_grad.copy_s());
-
-    let mut process_queue: VecDeque<TensorKey> = VecDeque::new();
-    process_queue.push_back(seed.to_key());
-
-    while let Some(u) = process_queue.pop_front() {
-
-        // Fix: Skip nodes that do not require gradients
-        if !u.node.requires_grad {
-            continue;
+        let node_count = nodes.len();
+        let mut base_in_degree = vec![0usize; node_count];
+        for u in 0..node_count {
+            for &v in &operands[u] {
+                base_in_degree[v] += 1;
+            }
         }
 
-        if let Some(grad_fn) = &u.node.grad_fn {
-            let in_grad = grads_map.get(&u).unwrap();
-            let ops_grad = grad_fn.compute_operands_grad(in_grad, retain_graph);
+        BackwardPlan {
+            nodes,
+            seed_idx,
+            operands,
+            is_leaf,
+            base_in_degree,
+            grads: (0..node_count).map(|_| None).collect(),
+            scratch: Vec::new(),
+        }
+    }
 
-            for (op, op_grad_opt) in grad_fn.get_operands().iter().zip(ops_grad.iter()) {
+    /// Execute the compiled backward pass from the seed this plan was built for.
+    pub fn run(&mut self, retain_graph: bool) -> HashMap<TensorKey, GraphTensor> {
+        let mut in_degree = self.base_in_degree.clone();
+        for grad in self.grads.iter_mut() {
+            *grad = None;
+        }
+
+        // NOTE: if 'retain_graph' = True, the gradient tensors have 'requires_grad = True'
+        //       otherwise, you cannot compute higher-order derivatives
+        let seed_shape = self.nodes[self.seed_idx].node.storage.shape.clone();
+        let seed_grad = GraphTensor::new(seed_shape, 1.0, retain_graph);
+        self.grads[self.seed_idx] = Some(seed_grad.copy_s());
+
+        let mut process_queue: VecDeque<usize> = VecDeque::new();
+        process_queue.push_back(self.seed_idx);
+
+        while let Some(u) = process_queue.pop_front() {
+
+            // Skip nodes that do not require gradients.
+            if !self.nodes[u].node.requires_grad {
+                continue;
+            }
+
+            let Some(grad_fn) = &self.nodes[u].node.grad_fn else {
+                continue;
+            };
+
+            {
+                let in_grad = self.grads[u].as_ref().unwrap();
+                grad_fn.compute_operands_grad(in_grad, retain_graph, &mut self.scratch);
+            }
+
+            for (&v, op_grad_opt) in self.operands[u].iter().zip(self.scratch.iter()) {
 
                 if let Some(op_grad) = op_grad_opt {
-                    let op_key = op.to_key();
-
-                    if grads_map.contains_key(&op_key) {
+                    if self.grads[v].is_some() {
                         if retain_graph {
                             // Higher-order path: preserve the additive structure of the
                             // accumulated gradient so that recomputing its derivative is
                             // still possible. The summing step is an explicit graph node.
-                            // This unwrap is 100% safe because 'u' requires grad and was reached.
-                            let a = grads_map.get(&op_key).unwrap();
-                            grads_map.insert(op_key, a + op_grad);
+                            let a = self.grads[v].as_ref().unwrap();
+                            let sum = a + op_grad;
+                            self.grads[v] = Some(sum);
                         } else {
                             // First-order path: fuse the new contribution into the existing
                             // gradient buffer in place, skipping the allocation and the
                             // graph node entirely. Fall back to the allocating sum when the
                             // buffer cannot be mutated (shared/aliased or strided).
-                            let fused = match grads_map.get_mut(&op_key) {
+                            let fused = match self.grads.get_mut(v).and_then(|g| g.as_mut()) {
                                 Some(a) => accumulate_inplace(a, op_grad),
                                 None => false,
                             };
                             if !fused {
-                                let a = grads_map.get(&op_key).unwrap();
-                                grads_map.insert(op_key, a + op_grad);
+                                let a = self.grads[v].as_ref().unwrap();
+                                let sum = a + op_grad;
+                                self.grads[v] = Some(sum);
                             }
                         }
                     } else {
-                        grads_map.insert(op_key, op_grad.copy_s());
+                        self.grads[v] = Some(op_grad.copy_s());
                     }
                 }
 
-                // We must still decrement the in-degree of operands (even if they don't require grad)
-                // because we incremented them in compute_in_degree.
-                if let Some(in_d) = in_degree.get_mut(&op.to_key()) {
-                    *in_d -= 1;
-                    if *in_d == 0 {
-                        process_queue.push_back(op.to_key());
+                // Decrement the in-degree of every operand edge. Operands that never
+                // receive a gradient contribution (non-requires-grad) simply never
+                // reach zero and are never scheduled.
+                in_degree[v] -= 1;
+                if in_degree[v] == 0 {
+                    process_queue.push_back(v);
+                }
+            }
+        }
+
+        // Materialize the output map, moving gradients out of the reusable buffer.
+        // First-order path: keep only leaf tensors; higher-order callers keep every
+        // gradient so they can fetch intermediates.
+        let mut grads_map = HashMap::new();
+        if retain_graph {
+            for (i, grad) in self.grads.iter_mut().enumerate() {
+                if let Some(g) = grad.take() {
+                    grads_map.insert(self.nodes[i].clone(), g);
+                }
+            }
+        } else {
+            for (i, grad) in self.grads.iter_mut().enumerate() {
+                if self.is_leaf[i] {
+                    if let Some(g) = grad.take() {
+                        grads_map.insert(self.nodes[i].clone(), g);
                     }
                 }
             }
-
-            // NOTE: cannot execute the free, because grad_fn are inside a mutable Rc, but the Rc should free it when possible
-            // if !retain_graph {
-            //     u.node.grad_fn = None
-            // }
         }
-    }
 
-    // First-order path only: retain only the gradients of leaf tensors. Higher-order
-    // callers (retain_graph=True) keep every gradient so they can fetch intermediates.
-    if !retain_graph {
-        grads_map.retain(|k, _| is_leaf.contains(k));
+        grads_map
     }
-
-    grads_map
 }
 
 /// Mutate `a`'s buffer in place by adding `b`'s values. Returns `false` without

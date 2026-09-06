@@ -12,19 +12,16 @@ impl GradRule<1> for SumOp {
     fn compute_grad(
         &self,
         operands: &[GraphTensor; 1],
-        in_grad: &GraphTensor
-    ) -> Vec<Option<GraphTensor>> {
-        let mut out_grads = Vec::with_capacity(1);
-
-        out_grads.push(operands[0].requires_grad().then(|| {
+        in_grad: &GraphTensor,
+        out: &mut Vec<Option<GraphTensor>>
+    ) {
+        out.push(operands[0].requires_grad().then(|| {
             let mut g = in_grad.copy_s();
             for (i, &size) in operands[0].shape().iter().enumerate() {
                 g = g.unsqueeze(i).expand(i, size);
             }
             g
         }));
-
-        out_grads
     }
 }
 
@@ -39,8 +36,9 @@ impl GradRule<1> for MaxDimOp {
     fn compute_grad(
         &self,
         operands: &[GraphTensor; 1],
-        in_grad: &GraphTensor
-    ) -> Vec<Option<GraphTensor>> {
+        in_grad: &GraphTensor,
+        out: &mut Vec<Option<GraphTensor>>
+    ) {
         let input = &operands[0];
         let size = input.shape()[self.dim];
 
@@ -52,10 +50,7 @@ impl GradRule<1> for MaxDimOp {
         // broadcast the upstream gradient back to the input shape
         let grad_b = in_grad.unsqueeze(self.dim).expand(self.dim, size);
 
-        let mut out_grads = Vec::with_capacity(1);
-        out_grads.push(input.requires_grad().then(|| &grad_b * &mask));
-
-        out_grads
+        out.push(input.requires_grad().then(|| &grad_b * &mask));
     }
 }
 
@@ -71,14 +66,11 @@ impl GradRule<1> for SumDimOp {
     fn compute_grad(
         &self,
         operands: &[GraphTensor; 1],
-        in_grad: &GraphTensor
-    ) -> Vec<Option<GraphTensor>> {
-        let mut out_grads = Vec::with_capacity(1);
-
-        out_grads.push(operands[0].requires_grad().then(|| {
+        in_grad: &GraphTensor,
+        out: &mut Vec<Option<GraphTensor>>
+    ) {
+        out.push(operands[0].requires_grad().then(|| {
             in_grad.unsqueeze(self.dim).expand(self.dim, self.original_times)
         }));
-
-        out_grads
     }
 }

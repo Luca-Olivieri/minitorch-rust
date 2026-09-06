@@ -10,15 +10,10 @@ impl GradRule<1> for CopyDOp {
     fn compute_grad(
         &self,
         operands: &[GraphTensor; 1],
-        in_grad: &GraphTensor
-    ) -> Vec<Option<GraphTensor>> {
-        let mut out_grads = Vec::with_capacity(1);
-
-        out_grads.push(operands[0].requires_grad().then(|| {
-            in_grad.copy_d()
-        }));
-
-        out_grads
+        in_grad: &GraphTensor,
+        out: &mut Vec<Option<GraphTensor>>
+    ) {
+        out.push(operands[0].requires_grad().then(|| in_grad.copy_d()));
     }
 }
 
@@ -33,15 +28,10 @@ impl GradRule<1> for UnsqueezeOp {
     fn compute_grad(
         &self,
         operands: &[GraphTensor; 1],
-        in_grad: &GraphTensor
-    ) -> Vec<Option<GraphTensor>> {
-        let mut out_grads = Vec::with_capacity(1);
-
-        out_grads.push(operands[0].requires_grad().then(|| {
-            in_grad.squeeze(self.dim)
-        }));
-
-        out_grads
+        in_grad: &GraphTensor,
+        out: &mut Vec<Option<GraphTensor>>
+    ) {
+        out.push(operands[0].requires_grad().then(|| in_grad.squeeze(self.dim)));
     }
 }
 
@@ -56,15 +46,10 @@ impl GradRule<1> for SqueezeOp {
     fn compute_grad(
         &self,
         operands: &[GraphTensor; 1],
-        in_grad: &GraphTensor
-    ) -> Vec<Option<GraphTensor>> {
-        let mut out_grads = Vec::with_capacity(1);
-
-        out_grads.push(operands[0].requires_grad().then(|| {
-            in_grad.unsqueeze(self.dim)
-        }));
-
-        out_grads
+        in_grad: &GraphTensor,
+        out: &mut Vec<Option<GraphTensor>>
+    ) {
+        out.push(operands[0].requires_grad().then(|| in_grad.unsqueeze(self.dim)));
     }
 }
 
@@ -77,15 +62,10 @@ impl GradRule<1> for TransposeOp {
     fn compute_grad(
         &self,
         operands: &[GraphTensor; 1],
-        in_grad: &GraphTensor
-    ) -> Vec<Option<GraphTensor>> {
-        let mut out_grads = Vec::with_capacity(1);
-
-        out_grads.push(operands[0].requires_grad().then(|| {
-            in_grad.transpose()
-        }));
-
-        out_grads
+        in_grad: &GraphTensor,
+        out: &mut Vec<Option<GraphTensor>>
+    ) {
+        out.push(operands[0].requires_grad().then(|| in_grad.transpose()));
     }
 }
 
@@ -100,14 +80,11 @@ impl GradRule<1> for ExpandOp {
     fn compute_grad(
         &self,
         operands: &[GraphTensor; 1],
-        in_grad: &GraphTensor
-    ) -> Vec<Option<GraphTensor>> {
-        let mut out_grads = Vec::with_capacity(1);
-
-        out_grads.push(operands[0].requires_grad().then(|| {
+        in_grad: &GraphTensor,
+        out: &mut Vec<Option<GraphTensor>>
+    ) {
+        out.push(operands[0].requires_grad().then(|| {
             in_grad.sum_dim(self.dim).unsqueeze(self.dim) // TODO implement a flag to keep the dimension
         }));
-
-        out_grads
     }
 }

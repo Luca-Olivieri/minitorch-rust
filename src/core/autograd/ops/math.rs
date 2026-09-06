@@ -9,9 +9,10 @@ impl GradRule<1> for NegOp {
     fn compute_grad(
         &self,
         operands: &[GraphTensor; 1],
-        in_grad: &GraphTensor
-    ) -> Vec<Option<GraphTensor>> {
-        vec![operands[0].requires_grad().then(|| -in_grad)]
+        in_grad: &GraphTensor,
+        out: &mut Vec<Option<GraphTensor>>
+    ) {
+        out.push(operands[0].requires_grad().then(|| -in_grad));
     }
 }
 
@@ -22,20 +23,16 @@ impl GradRule<1> for LnOp {
     fn compute_grad(
         &self,
         operands: &[GraphTensor; 1],
-        in_grad: &GraphTensor
-    ) -> Vec<Option<GraphTensor>> {
+        in_grad: &GraphTensor,
+        out: &mut Vec<Option<GraphTensor>>
+    ) {
         // y = ln(a)
         // dy/da = 1 / a
         let a = &operands[0];
-        let mut out_grads = Vec::with_capacity(1);
 
         // TODO should do inplace operations if retain_graph = False
 
-        out_grads.push(a.requires_grad().then(|| {
-            in_grad / a
-        }));
-
-        out_grads
+        out.push(a.requires_grad().then(|| in_grad / a));
     }
 }
 
@@ -46,13 +43,12 @@ impl GradRule<1> for ExpOp {
     fn compute_grad(
         &self,
         operands: &[GraphTensor; 1],
-        in_grad: &GraphTensor
-    ) -> Vec<Option<GraphTensor>> {
+        in_grad: &GraphTensor,
+        out: &mut Vec<Option<GraphTensor>>
+    ) {
         // y = exp(a) = e^a
         // dy/da = e^a = y
-        let mut out_grads = Vec::with_capacity(1);
-        out_grads.push(operands[0].requires_grad().then(|| in_grad * &operands[0].exp()));
-        out_grads
+        out.push(operands[0].requires_grad().then(|| in_grad * &operands[0].exp()));
     }
 }
 
@@ -64,12 +60,11 @@ impl GradRule<2> for MatmulOp {
     fn compute_grad(
         &self,
         operands: &[GraphTensor; 2],
-        in_grad: &GraphTensor
-    ) -> Vec<Option<GraphTensor>> {
-        let mut out_grads = Vec::with_capacity(2);
-        out_grads.push(operands[0].requires_grad().then(|| grad_a(&operands[0], &operands[1], in_grad)));
-        out_grads.push(operands[1].requires_grad().then(|| grad_b(&operands[0], &operands[1], in_grad)));
-        out_grads
+        in_grad: &GraphTensor,
+        out: &mut Vec<Option<GraphTensor>>
+    ) {
+        out.push(operands[0].requires_grad().then(|| grad_a(&operands[0], &operands[1], in_grad)));
+        out.push(operands[1].requires_grad().then(|| grad_b(&operands[0], &operands[1], in_grad)));
     }
 }
 
@@ -133,12 +128,11 @@ impl GradRule<2> for AddOp {
     fn compute_grad(
         &self,
         operands: &[GraphTensor; 2],
-        in_grad: &GraphTensor
-    ) -> Vec<Option<GraphTensor>> {
-        let mut out_grads = Vec::with_capacity(2);
-        out_grads.push(operands[0].requires_grad().then(|| in_grad.copy_d()));
-        out_grads.push(operands[1].requires_grad().then(|| in_grad.copy_d()));
-        out_grads
+        in_grad: &GraphTensor,
+        out: &mut Vec<Option<GraphTensor>>
+    ) {
+        out.push(operands[0].requires_grad().then(|| in_grad.copy_d()));
+        out.push(operands[1].requires_grad().then(|| in_grad.copy_d()));
     }
 }
 
@@ -150,12 +144,11 @@ impl GradRule<2> for SubOp {
     fn compute_grad(
         &self,
         operands: &[GraphTensor; 2],
-        in_grad: &GraphTensor
-    ) -> Vec<Option<GraphTensor>> {
-        let mut out_grads = Vec::with_capacity(2);
-        out_grads.push(operands[0].requires_grad().then(|| in_grad.copy_d()));
-        out_grads.push(operands[1].requires_grad().then(|| -in_grad));
-        out_grads
+        in_grad: &GraphTensor,
+        out: &mut Vec<Option<GraphTensor>>
+    ) {
+        out.push(operands[0].requires_grad().then(|| in_grad.copy_d()));
+        out.push(operands[1].requires_grad().then(|| -in_grad));
     }
 }
 
@@ -167,13 +160,12 @@ impl GradRule<2> for MulOp {
     fn compute_grad(
         &self,
         operands: &[GraphTensor; 2],
-        in_grad: &GraphTensor
-    ) -> Vec<Option<GraphTensor>> {
-        let mut out_grads = Vec::with_capacity(2);
+        in_grad: &GraphTensor,
+        out: &mut Vec<Option<GraphTensor>>
+    ) {
         // d/dx0 (x0*x1) = in_grad * x1, d/dx1 = in_grad * x0
-        out_grads.push(operands[0].requires_grad().then(|| in_grad * &operands[1]));
-        out_grads.push(operands[1].requires_grad().then(|| in_grad * &operands[0]));
-        out_grads
+        out.push(operands[0].requires_grad().then(|| in_grad * &operands[1]));
+        out.push(operands[1].requires_grad().then(|| in_grad * &operands[0]));
     }
 }
 
@@ -184,17 +176,16 @@ impl GradRule<2> for DivOp {
     fn compute_grad(
         &self,
         operands: &[GraphTensor; 2],
-        in_grad: &GraphTensor
-    ) -> Vec<Option<GraphTensor>> {
+        in_grad: &GraphTensor,
+        out: &mut Vec<Option<GraphTensor>>
+    ) {
         // y = a / b
         // dy/da = 1/b            -> grad_a = in_grad / b
         // dy/db = -a/b^2         -> grad_b = -(in_grad * a) / (b * b)
-        let mut out_grads = Vec::with_capacity(2);
-        out_grads.push(operands[0].requires_grad().then(|| in_grad / &operands[1]));
-        out_grads.push(operands[1].requires_grad().then(|| {
-            &(-&(in_grad * &operands[0])) / &(&operands[1] * &operands[1])
+        out.push(operands[0].requires_grad().then(|| in_grad / &operands[1]));
+        out.push(operands[1].requires_grad().then(|| {
+            &-&(in_grad * &operands[0]) / &(&operands[1] * &operands[1])
         }));
-        out_grads
     }
 }
 
@@ -205,28 +196,26 @@ impl GradRule<2> for PowOp {
     fn compute_grad(
         &self,
         operands: &[GraphTensor; 2],
-        in_grad: &GraphTensor
-    ) -> Vec<Option<GraphTensor>> {
+        in_grad: &GraphTensor,
+        out: &mut Vec<Option<GraphTensor>>
+    ) {
         // y = b.powf(e)
         // dy/db = e * b^(e-1)
         // dy/de = b^e * ln(b)
         let base = &operands[0];
         let exp = &operands[1];
-        let mut out_grads = Vec::with_capacity(2);
 
-        out_grads.push(base.requires_grad().then(|| {
+        out.push(base.requires_grad().then(|| {
             let exp_minus_one = exp - 1.0;
             &(in_grad * exp) * &base.pow(&exp_minus_one)
         }));
 
-        out_grads.push(exp.requires_grad().then(|| {
+        out.push(exp.requires_grad().then(|| {
             // ln(b) computed as log base e of b, reusing the log op's convention: a.log(b)
             let ln_base = base.ln();
             let y = base.pow(exp);
             &(in_grad * &y) * &ln_base
         }));
-
-        out_grads
     }
 }
 
@@ -237,19 +226,17 @@ impl GradRule<2> for MaximumOp {
     fn compute_grad(
         &self,
         operands: &[GraphTensor; 2],
-        in_grad: &GraphTensor
-    ) -> Vec<Option<GraphTensor>> {
+        in_grad: &GraphTensor,
+        out: &mut Vec<Option<GraphTensor>>
+    ) {
         // y = b.powf(e)
         // dy/db = e * b^(e-1)
         // dy/de = b^e * ln(b)
         let a = &operands[0];
         let b = &operands[1];
-        let mut out_grads = Vec::with_capacity(2);
 
-        out_grads.push(a.requires_grad().then(|| { in_grad * &a.gte(b) }));
-        out_grads.push(b.requires_grad().then(|| { in_grad * &a.lt(b) })); // TODO implement a NOT operator
-
-        out_grads
+        out.push(a.requires_grad().then(|| in_grad * &a.gte(b)));
+        out.push(b.requires_grad().then(|| in_grad * &a.lt(b))); // TODO implement a NOT operator
     }
 }
 
