@@ -46,22 +46,6 @@ impl TensorStorage {
             offset
         }
     }
-
-    pub fn logic_to_md(
-        &self,
-        l_idx: usize
-    ) -> Vec<usize> {
-        if l_idx >= self.numel {
-            panic!("Logical index {} out of bounds for tensor of size {}.", l_idx, self.numel);
-        }
-        let mut curr_idx = l_idx;
-        let mut md = vec![0; self.shape.len()];
-        for i in (0..self.shape.len()).rev() {
-            md[i] = curr_idx % self.shape[i];
-            curr_idx /= self.shape[i];
-        }
-        md
-    }
 }
 
 impl Index<&Vec<usize>> for TensorStorage {
