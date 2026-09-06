@@ -101,7 +101,6 @@ fn try_xor() {
 
     println!("{}", &model.forward(&inputs).get_node().storage);
 
-
     for epoch in 0..num_epochs {
 
         let start = Instant::now();
@@ -120,7 +119,7 @@ fn try_xor() {
 
         let start = Instant::now();
 
-        let params = model.all_params_mut();
+        let params = &mut model.all_params_mut();
 
         optimizer.step(params, &grads_map);
 
@@ -133,12 +132,11 @@ fn try_xor() {
         }
     }
 
-    let logits = model.forward(&inputs);
-    let gts_oh = targets.one_hot(logits.shape()[1]);
+    // let logits = model.forward(&inputs);
+    // let gts_oh = targets.one_hot(logits.shape()[1]);
 
-    println!("{}", &logits.argmax(1).get_node().storage);
-    println!("{}", &gts_oh.argmax(1).get_node().storage);
-
+    // println!("{}", &logits.argmax(1).get_node().storage);
+    // println!("{}", &gts_oh.argmax(1).get_node().storage);
 
 }
 

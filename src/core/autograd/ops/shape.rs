@@ -69,6 +69,27 @@ impl GradRule<1> for SqueezeOp {
 }
 
 #[derive(Debug)]
+pub struct TransposeOp {}
+
+pub type BackwardTranspose = NBackwardOp<TransposeOp, 1>;
+
+impl GradRule<1> for TransposeOp {
+    fn compute_grad(
+        &self,
+        operands: &[GraphTensor; 1],
+        in_grad: &GraphTensor
+    ) -> Vec<Option<GraphTensor>> {
+        let mut out_grads = Vec::with_capacity(1);
+
+        out_grads.push(operands[0].requires_grad().then(|| {
+            in_grad.transpose()
+        }));
+
+        out_grads
+    }
+}
+
+#[derive(Debug)]
 pub struct ExpandOp {
     pub dim: usize,
 }

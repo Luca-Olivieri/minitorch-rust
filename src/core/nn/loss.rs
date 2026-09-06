@@ -1,4 +1,7 @@
-use crate::core::{GraphTensor, nn::{activate::Softmax, module::{Forward1, Module}}, tensor::AbstractTensor};
+use crate::core::GraphTensor;
+use crate::core::tensor::AbstractTensor;
+use crate::core::nn::activate::Softmax;
+use crate::core::nn::module::Forward1;
 
 pub trait Loss {
     fn forward(

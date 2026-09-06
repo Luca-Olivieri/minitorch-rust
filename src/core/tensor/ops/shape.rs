@@ -1,7 +1,8 @@
 use crate::core::GraphTensor;
+use crate::core::tensor::AbstractTensor;
 
 use crate::core::autograd::ops::shape::{
-    BackwardCopyD, BackwardExpand, BackwardSqueeze, BackwardUnsqueeze, CopyDOp, ExpandOp, SqueezeOp, UnsqueezeOp
+    BackwardCopyD, BackwardExpand, BackwardSqueeze, BackwardTranspose, BackwardUnsqueeze, CopyDOp, ExpandOp, SqueezeOp, TransposeOp, UnsqueezeOp
 };
 use crate::core::storage::TensorStorage;
 use crate::core::tensor::ops::math::apply_tensor_op;
@@ -43,6 +44,23 @@ impl GraphTensor {
             |ops: &[&TensorStorage; 1]| TensorStorage::squeeze(ops[0], dim),
             Some(|operands: [GraphTensor; 1]| {
                 Box::new(BackwardSqueeze{operands: operands, op: SqueezeOp{dim}}) as Box<dyn GradFnTrait>
+            }),
+            &[self],
+        )
+    }
+
+    pub fn transpose(
+        &self
+    ) -> GraphTensor {
+
+        if self.shape().len() != 2 {
+            panic!("transpose() requires a 2D tensor, got shape {:?}.", self.shape());
+        }
+
+        apply_tensor_op(
+            |ops: &[&TensorStorage; 1]| TensorStorage::transpose(ops[0]),
+            Some(|operands: [GraphTensor; 1]| {
+                Box::new(BackwardTranspose{operands, op: TransposeOp{}}) as Box<dyn GradFnTrait>
             }),
             &[self],
         )

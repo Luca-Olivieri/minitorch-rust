@@ -6,7 +6,7 @@ pub trait Optimizer {
 
     fn step(
         &self,
-        params: HashMap<String, &mut GraphTensor>,
+        params: &mut HashMap<String, &mut GraphTensor>,
         grads_map: &HashMap<TensorKey, GraphTensor>
     );
 }
@@ -25,13 +25,13 @@ impl Optimizer for SGD {
 
     fn step(
         &self,
-        params: HashMap<String, &mut GraphTensor>,
+        params: &mut HashMap<String, &mut GraphTensor>,
         grads_map: &HashMap<TensorKey, GraphTensor>
     ) {
-        for param in params.into_values() {
+        for param in params.values_mut() {
             if let Some(g) = grads_map.get(&param.to_key()) {
                 let delta = &(g * self.base_lr);
-                *param = (&*param - delta).detach(true);
+                **param = (&**param - delta).detach(true);
             }
         }
     }

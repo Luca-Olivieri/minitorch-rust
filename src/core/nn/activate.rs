@@ -42,9 +42,8 @@ impl Forward1 for Softmax {
 
         let dim = ndim - 1; // softmax over the last dimension
 
-        // compute exponentials using e^x via elementwise pow with base e
-        let e_const = GraphTensor::new(input.shape().clone(), std::f64::consts::E, false);
-        let exps = e_const.pow(input);
+        // compute exponentials via exp
+        let exps = input.exp();
 
         // sum over the target dimension and broadcast for division
         let sums = &exps.sum_dim(dim);

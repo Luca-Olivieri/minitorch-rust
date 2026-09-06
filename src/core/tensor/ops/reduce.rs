@@ -1,8 +1,8 @@
-use std::os::raw;
 use std::rc::Rc;
 
 use crate::core::GraphTensor;
 
+use crate::core::autograd::ops::math::{BackwardMatmul, MatmulOp};
 use crate::core::autograd::ops::reduce::{BackwardSumDim, SumDimOp};
 use crate::core::node::TensorNode;
 use crate::core::storage::TensorStorage;
@@ -150,40 +150,37 @@ impl GraphTensor {
         }
 
         // Convert 1D inputs to 2D views: a [K] -> [1,K], b [K] -> [K,1]
-        let a_was_1d = a_ndim == 1;
-        let b_was_1d = b_ndim == 1;
-
-        let a2 = if a_was_1d { a.unsqueeze(0) } else { a.copy_s() };
-        let b2 = if b_was_1d { b.unsqueeze(0) } else { b.copy_s() };
+        let a2 = if a_ndim == 1 { a.unsqueeze(0) } else { a.copy_s() };
+        let b2 = if b_ndim == 1 { b.unsqueeze(1) } else { b.copy_s() };
 
         let a2_shape = a2.shape(); // [m, k]
-        let b2_shape = b2.shape(); // [kb, n]
+        let b2_shape = b2.shape(); // [k, n]
 
-        let m = a2_shape[0];
         let k = a2_shape[1];
         let kb = b2_shape[0];
-        let n = b2_shape[1];
 
         if k != kb {
             panic!("matmul inner dimensions must match ({} != {})", k, kb);
         }
 
-        // Use unsqueeze->expand->mult->sum pipeline on 2D views
-        let a_expanded = a2.unsqueeze(2).expand(2, n); // [m, k] -> [m,k,1] -> [m,k,n]
-        let b_expanded = b2.unsqueeze(0).expand(0, m); // [k, n] -> [1,k,n] -> [m,k,n]
+        // Direct [m,k] x [k,n] -> [m,n] kernel.
+        let out_store = TensorStorage::matmul(&a2.node.storage, &b2.node.storage);
 
-        let prod = &a_expanded * &b_expanded; // element-wise [m,k,n]
-        let mut out = prod.sum_dim(1); // sum over k -> [m,n]
+        // Only attach a grad_fn if at least one operand requires gradients.
+        let requires_grad = a.requires_grad() || b.requires_grad();
+        let grad_fn = requires_grad.then(|| {
+            Box::new(BackwardMatmul {
+                operands: [a.copy_s(), b.copy_s()],
+                op: MatmulOp {},
+            }) as Box<dyn GradFnTrait>
+        });
 
-        // Squeeze result back to original dimensionality
-        if a_was_1d && b_was_1d {
-            out = out.squeeze(0).squeeze(0); // scalar
-        } else if a_was_1d {
-            out = out.squeeze(0); // shape [N]
-        } else if b_was_1d {
-            out = out.squeeze(1); // shape [M]
-        }
+        let out_node = TensorNode {
+            storage: out_store,
+            requires_grad,
+            grad_fn,
+        };
 
-        out
+        GraphTensor { node: Rc::new(out_node) }
     }
 }
