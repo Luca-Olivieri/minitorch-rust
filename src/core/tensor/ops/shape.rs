@@ -1,4 +1,7 @@
+use std::rc::Rc;
+
 use crate::core::GraphTensor;
+use crate::core::node::TensorNode;
 use crate::core::tensor::AbstractTensor;
 
 use crate::core::autograd::ops::shape::{
@@ -79,5 +82,31 @@ impl GraphTensor {
             }),
             &[self],
         )
+    }
+
+    /// Stack a list of tensors along a new dimension 0.
+    ///
+    /// All tensors must have the same shape. The output has shape
+    /// `[N, original_shape...]` where `N` is the number of inputs.
+    pub fn stack(tensors: &[GraphTensor]) -> GraphTensor {
+        if tensors.is_empty() {
+            panic!("Cannot stack an empty list of tensors.");
+        }
+
+        let storages: Vec<&TensorStorage> = tensors
+            .iter()
+            .map(|t| &t.node.storage)
+            .collect();
+        let out_store = TensorStorage::stack(&storages);
+
+        let requires_grad = tensors.iter().any(|t| t.requires_grad());
+
+        let out_node = TensorNode {
+            storage: out_store,
+            requires_grad,
+            grad_fn: None,
+        };
+
+        GraphTensor { node: Rc::new(out_node) }
     }
 }

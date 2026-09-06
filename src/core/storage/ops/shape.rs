@@ -128,6 +128,42 @@ impl TensorStorage {
             offset: a.offset,
         }
     }
+
+    /// Stack a list of tensors along a new dimension 0.
+    ///
+    /// All input tensors must have identical shapes. The output has shape
+    /// `[N, original_shape...]` where `N` is the number of inputs.
+    pub fn stack(storages: &[&TensorStorage]) -> TensorStorage {
+        if storages.is_empty() {
+            panic!("Cannot stack an empty list of tensors.");
+        }
+
+        let elem_shape = storages[0].shape.clone();
+        for s in storages.iter().skip(1) {
+            if s.shape != elem_shape {
+                panic!(
+                    "All tensors must have the same shape to stack. Got {:?} vs {:?}.",
+                    elem_shape, s.shape
+                );
+            }
+        }
+
+        let n = storages.len();
+        let elem_numel = storages[0].numel;
+
+        let mut out_shape = Vec::with_capacity(elem_shape.len() + 1);
+        out_shape.push(n);
+        out_shape.extend_from_slice(&elem_shape);
+
+        let mut out_buf = Vec::with_capacity(elem_numel * n);
+        for s in storages {
+            for i in 0..elem_numel {
+                out_buf.push(s[i]);
+            }
+        }
+
+        TensorStorage::from_buffer(out_shape, out_buf)
+    }
 }
 
 fn unsqueeze_shape(

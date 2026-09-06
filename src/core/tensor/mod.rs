@@ -97,6 +97,13 @@ impl GraphTensor { // turn this impl and the above one in a macro
         Self { node: Rc::new(node) }
     }
 
+    // TODO temporary, implement a method to build GraphTensor from a Vec of vectors
+    pub fn from_node(
+        node: TensorNode
+    ) -> Self {
+        Self { node: Rc::new(node) }
+    }
+
     pub fn copy_s(&self) -> GraphTensor {
         Self { node: self.node.clone()}
     }
