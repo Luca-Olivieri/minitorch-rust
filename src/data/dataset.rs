@@ -4,6 +4,7 @@ use std::io::{self, BufRead, BufReader, Seek, SeekFrom};
 use crate::core::GraphTensor;
 use crate::core::node::TensorNode;
 use crate::core::storage::TensorStorage;
+use crate::core::tensor::AbstractTensor;
 
 pub struct CovertypeDataset{
     pub path: String,
@@ -91,14 +92,11 @@ impl CovertypeDataset {
             .skip(1) // skip "index" column
             .map(|v| v.parse().unwrap())
             .collect();
-        let gt_buf = vec![buffer.pop().unwrap() - 1.0];
-
-        let in_storage = TensorStorage::from_buffer(vec![54], buffer);
-        let gt_storage = TensorStorage::from_buffer(vec![], gt_buf);
+        let gt = buffer.pop().unwrap() - 1.0;
 
         (
-            GraphTensor::from_node(TensorNode::from_storage(in_storage, false)),
-            GraphTensor::from_node(TensorNode::from_storage(gt_storage, false))
+            GraphTensor::from_vec(buffer, false),
+            GraphTensor::from_vec(gt, false)
         )
     }
 }

@@ -22,58 +22,6 @@ macro_rules! timeit {
 }
 
 fn main() {
-    println!("Hello, world!");
-
-    // let shape = vec![1, 2, 3];
-
-    // // let a = TensorStorage::new(shape.clone(), 5.1);
-    // // let b = TensorStorage::new(shape.clone(), 9.2);
-
-    // // println!("{}", TensorStorage::add(&a, &b));
-    // // println!("{}", TensorStorage::minus(&a));
-    // // println!("{}", TensorStorage::sub(&a, &b));
-    // // println!("{}", TensorStorage::modul(&a, &b));
-    // // println!("{}", TensorStorage::mult(&a, &b));
-    // // println!("{}", TensorStorage::div(&a, &b));
-    // // println!("{}", TensorStorage::pow(&a, &b));
-    // // println!("{}", TensorStorage::log(&a, &b));
-    // // dbg!(TensorStorage::add(&a, &b));
-
-    // let md_idx: Vec<usize> = vec![0, 1, 2];
-
-    // let mut f = FreeTensor::new(shape.clone(), 10.0, true);
-
-    // let md_idx = vec![0, 1, 2];
-
-    // dbg!(f.at(&md_idx));
-    // f.set(&md_idx, 3.0);
-    // dbg!(f.at(&md_idx));
-
-    // let a = GraphTensor::new(shape.clone(), 5.1, true);
-    // let b = GraphTensor::new(shape.clone(), 9.2, true);
-
-    // let c = &a + &b;
-    // let d = &c - &a;
-
-    // let grads_map = d.backward(false);
-
-    // let grad = grads_map.get(&a.to_key()).unwrap();
-
-    // dbg!(&grad.get_node().storage);
-
-    // let sum = TensorStorage::sum(&s);
-    // dbg!(sum);
-
-    // test_complex_operation();
-    // test_simple_operation();
-
-    // test_shapes();
-    // test_one_hot();
-    // test_matmul();
-
-    // test_linear_relu();
-
-    // try_xor();
     try_covertype();
 }
 
@@ -112,8 +60,6 @@ fn try_covertype() {
         let mut epoch_loss = 0.0;
         let mut num_steps = 0;
 
-        let epoch_train_start = Instant::now();
-
         timeit!("Training epoch completed (took {elapsed} s)";
         for step in 0..train_loader.size() {
 
@@ -144,13 +90,13 @@ fn try_covertype() {
             epoch_loss += loss.item();
             num_steps += 1;
 
-            if epoch % 1 == 0 && step == 1000 {
+            if (epoch+1) % 2 == 0 && (step+1) == 1000 {
                 println!("=== [EPOCH {epoch}] STEP {step} === ");
                 dbg!(forward_time, loss_time, backward_time, step_time, grads_map.len());
             }
         });
 
-        if epoch % 10 == 0 {
+        if (epoch+1) % 2 == 0 {
             println!("=== [EPOCH {epoch}] avg loss = {} over {num_steps} steps ===", epoch_loss / num_steps as f64);
         }
     }
