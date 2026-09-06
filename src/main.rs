@@ -10,6 +10,17 @@ use crate::{core::{nn::{activate::{ReLU, Softmax}, compute::Linear, loss::{Cross
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
+macro_rules! timeit {
+    ($fmt:literal; $($stmt:stmt)*) => {
+        let __start = std::time::Instant::now();
+
+        $($stmt)*
+
+        let __elapsed = __start.elapsed();
+        println!("{}", $fmt.replace("{elapsed}", &format!("{:?}", __elapsed)));
+    };
+}
+
 fn main() {
     println!("Hello, world!");
 
@@ -64,6 +75,86 @@ fn main() {
 
     // try_xor();
     try_covertype();
+}
+
+fn try_covertype() {
+
+    timeit!("Datasets set up (took {elapsed} s)";
+    let limit = 100;
+    let train_ds = CovertypeDataset::new(String::from("/Users/lucaolivieri/Desktop/CS/coding/C++/minitorch/data/covertype_train.csv"), Some(limit));
+    let val_ds = CovertypeDataset::new(String::from("/Users/lucaolivieri/Desktop/CS/coding/C++/minitorch/data/covertype_train.csv"), Some(limit));
+    );
+
+
+    timeit!("Dataloaders set up (took {elapsed} s)";
+    let batch_size = 4;
+    let mut train_loader = DataLoader::new(train_ds, batch_size, true, 42);
+    let val_loader = DataLoader::new(val_ds, batch_size, false, 42);
+    );
+
+    let rng = StdRng::seed_from_u64(42);
+
+    timeit!("Model set up (took {elapsed} s)";
+    let mut model = CovertypeClassifier::new(rng);
+    );
+
+    timeit!("Criterion and optimizer set up (took {elapsed} s)";
+    let criterion = CrossEntropyLoss::new();
+    let optimizer = SGD::new(0.01);
+    );
+
+    let num_epochs = 2;
+
+    for epoch in 0..num_epochs {
+
+        train_loader.reshuffle();
+
+        let mut epoch_loss = 0.0;
+        let mut num_steps = 0;
+
+        let epoch_train_start = Instant::now();
+
+        timeit!("Training epoch completed (took {elapsed} s)";
+        for step in 0..train_loader.size() {
+
+            let (inputs, targets) = train_loader.get_batch(step);
+
+            let start = Instant::now();
+            let logits = model.forward(&inputs);
+            let forward_time = start.elapsed();
+
+            let gts_oh = targets.one_hot(logits.shape()[1]);
+
+            let start = Instant::now();
+            let loss = criterion.forward(&logits, &gts_oh);
+            let loss_time = start.elapsed();
+
+            let start = Instant::now();
+            let grads_map = loss.backward(false);
+            let backward_time = start.elapsed();
+
+            let start = Instant::now();
+
+            let params = &mut model.all_params_mut();
+
+            optimizer.step(params, &grads_map);
+
+            let step_time = start.elapsed();
+
+            epoch_loss += loss.item();
+            num_steps += 1;
+
+            if epoch % 1 == 0 && step == 1000 {
+                println!("=== [EPOCH {epoch}] STEP {step} === ");
+                dbg!(forward_time, loss_time, backward_time, step_time, grads_map.len());
+            }
+        });
+
+        if epoch % 10 == 0 {
+            println!("=== [EPOCH {epoch}] avg loss = {} over {num_steps} steps ===", epoch_loss / num_steps as f64);
+        }
+    }
+
 }
 
 fn try_xor() {
@@ -137,94 +228,6 @@ fn try_xor() {
 
     // println!("{}", &logits.argmax(1).get_node().storage);
     // println!("{}", &gts_oh.argmax(1).get_node().storage);
-
-}
-
-fn try_covertype() {
-
-    let start = Instant::now();
-    let limit = 100;
-    let train_ds = CovertypeDataset::new(String::from("/Users/lucaolivieri/Desktop/CS/coding/C++/minitorch/data/covertype_train.csv"), Some(limit));
-    let val_ds = CovertypeDataset::new(String::from("/Users/lucaolivieri/Desktop/CS/coding/C++/minitorch/data/covertype_train.csv"), Some(limit));
-    let ds_time = start.elapsed();
-    dbg!(ds_time);
-
-    let start = Instant::now();
-    let batch_size = 4;
-    let mut train_loader = DataLoader::new(train_ds, batch_size, true, 42);
-    let val_loader = DataLoader::new(val_ds, batch_size, false, 42);
-    let dl_time = start.elapsed();
-    dbg!(dl_time);
-
-    let rng = StdRng::seed_from_u64(42);
-
-    let start = Instant::now();
-    let mut model = CovertypeClassifier::new(rng);
-    let model_time = start.elapsed();
-    dbg!(model_time);
-
-    let start = Instant::now();
-    let criterion = CrossEntropyLoss::new();
-    let optimizer = SGD::new(0.01);
-    let crit_opt_time = start.elapsed();
-    dbg!(crit_opt_time);
-
-    let num_epochs = 2;
-
-    let softmax = Softmax::new();
-
-    for epoch in 0..num_epochs {
-
-        train_loader.reshuffle();
-
-        let mut epoch_loss = 0.0;
-        let mut num_steps = 0;
-
-        let epoch_train_start = Instant::now();
-
-        for step in 0..train_loader.size() {
-
-            let (inputs, targets) = train_loader.get_batch(step);
-
-            let start = Instant::now();
-            let logits = model.forward(&inputs);
-            let forward_time = start.elapsed();
-
-            let gts_oh = targets.one_hot(logits.shape()[1]);
-
-            let start = Instant::now();
-            let loss = criterion.forward(&logits, &gts_oh);
-            let loss_time = start.elapsed();
-
-            let start = Instant::now();
-            let grads_map = loss.backward(false);
-            let backward_time = start.elapsed();
-
-            let start = Instant::now();
-
-            let params = &mut model.all_params_mut();
-
-            optimizer.step(params, &grads_map);
-
-            let step_time = start.elapsed();
-
-            epoch_loss += loss.item();
-            num_steps += 1;
-
-            if epoch % 1 == 0 && step == 1000 {
-                let prs = softmax.forward(&logits);
-                println!("=== [EPOCH {epoch}] STEP {step} === ");
-                dbg!(forward_time, loss_time, backward_time, step_time, GraphTensor::dist(&prs, &gts_oh), grads_map.len());
-            }
-        }
-
-        let epoch_train_time = epoch_train_start.elapsed();
-        dbg!(&epoch_train_time);
-
-        if epoch % 10 == 0 {
-            println!("=== [EPOCH {epoch}] avg loss = {} over {num_steps} steps ===", epoch_loss / num_steps as f64);
-        }
-    }
 
 }
 
