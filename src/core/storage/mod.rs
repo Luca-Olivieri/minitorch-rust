@@ -41,8 +41,11 @@ impl TensorStorage {
         }
     }
 
-    pub fn new_uninit(
-        shape: Vec<usize>
+    /// Wrap an already-completely-initialized contiguous buffer into a storage.
+    /// The resulting tensor is a contiguous, offset-0 view of `buffer`.
+    pub(crate) fn from_buffer(
+        shape: Vec<usize>,
+        buffer: Vec<f64>
     ) -> Self {
 
         if !are_dims_positive(&shape) {
@@ -50,10 +53,14 @@ impl TensorStorage {
         }
 
         let numel = compute_numel_from_shape(&shape);
+        if buffer.len() != numel {
+            panic!("Buffer length {} does not match shape numel {}.", buffer.len(), numel)
+        }
+
         let strides = init_strides(&shape);
 
         Self {
-            buffer: Rc::new(Vec::with_capacity(numel)),
+            buffer: Rc::new(buffer),
             shape: shape,
             strides: strides,
             contiguous: true,

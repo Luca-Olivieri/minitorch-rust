@@ -34,6 +34,19 @@ impl GraphTensor {
     ) -> f64 {
         (a-b).norm()
     }
+
+    pub fn sub_scaled(
+        &self,
+        other: &GraphTensor,
+        scale: f64
+    ) -> GraphTensor {
+        // Computes self - scale * other in a single fused pass (no intermediate).
+        apply_tensor_op(
+            |ops: &[&TensorStorage; 2]| TensorStorage::sub_scaled(ops[0], ops[1], scale),
+            None::<fn([GraphTensor; 2]) -> Box<dyn GradFnTrait>>,
+            &[self, other],
+        )
+    }
 }
 
 impl_tensor_binary_ops! {

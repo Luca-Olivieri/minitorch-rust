@@ -42,8 +42,12 @@ impl Forward1 for Softmax {
 
         let dim = ndim - 1; // softmax over the last dimension
 
-        // compute exponentials via exp
-        let exps = input.exp();
+        // subtract the max over the class dim for numerical stability
+        let maxes = input.max_dim(dim);
+        let shifted = input - &maxes.unsqueeze(dim).expand(dim, input.shape()[dim]);
+
+        // compute exponentials of the shifted values
+        let exps = shifted.exp();
 
         // sum over the target dimension and broadcast for division
         let sums = &exps.sum_dim(dim);

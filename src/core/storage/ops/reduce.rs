@@ -4,6 +4,19 @@ use crate::core::storage::TensorStorage;
 use crate::core::storage::ops::shape::squeeze_shape;
 
 impl TensorStorage {
+    /// Reduce over every dimension in a single pass, yielding a scalar `[]`.
+    pub fn sum_all(
+        a: &TensorStorage
+    ) -> TensorStorage {
+        let total = if a.contiguous {
+            a.buffer[a.offset..a.offset + a.numel].iter().sum()
+        } else {
+            (0..a.numel).map(|i| a[i]).sum()
+        };
+
+        TensorStorage::from_buffer(Vec::new(), vec![total])
+    }
+
     pub fn sum_dim(
         a: &TensorStorage,
         dim: usize
@@ -35,6 +48,48 @@ impl TensorStorage {
             }
 
             out_buf[out_i] = acc;
+        }
+
+        out
+    }
+
+    pub fn max_dim(
+        a: &TensorStorage,
+        dim: usize
+    ) -> TensorStorage {
+        if dim >= a.shape.len() {
+            panic!("Reduction dimension {} out of range for shape {:?}.", dim, a.shape);
+        }
+
+         // build output shape
+        let out_shape = squeeze_shape(&a.shape, dim);
+
+        let mut out = TensorStorage::new(out_shape, 0.0);
+
+        let out_buf = Rc::get_mut(&mut out.buffer).unwrap();
+        let a_buf = &a.buffer;
+
+        // consecutive elements along the reduced dim are `reduced_stride` apart in flat space
+        let reduced_stride = a.strides[dim];
+        let bases = base_offsets(a, dim);
+
+        // iterate over output logical indices
+        for out_i in 0..out.numel {
+            // initialize max tracking with the first element along the dimension
+            let mut f = bases[out_i];
+            let mut max_val = a_buf[f];
+
+            // iterate through the remaining elements in the dimension
+            for _ in 1..a.shape[dim] {
+                f += reduced_stride;
+                let val = a_buf[f];
+
+                if val > max_val {
+                    max_val = val;
+                }
+            }
+
+            out_buf[out_i] = max_val;
         }
 
         out

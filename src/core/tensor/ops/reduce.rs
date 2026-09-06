@@ -3,7 +3,7 @@ use std::rc::Rc;
 use crate::core::GraphTensor;
 
 use crate::core::autograd::ops::math::{BackwardMatmul, MatmulOp};
-use crate::core::autograd::ops::reduce::{BackwardSumDim, SumDimOp};
+use crate::core::autograd::ops::reduce::{BackwardMaxDim, BackwardSum, BackwardSumDim, MaxDimOp, SumDimOp, SumOp};
 use crate::core::node::TensorNode;
 use crate::core::storage::TensorStorage;
 use crate::core::tensor::AbstractTensor;
@@ -33,13 +33,16 @@ impl GraphTensor {
         &self,
     ) -> GraphTensor {
 
-        let mut out = self.copy_s();
-
-        for _ in 0..self.shape().len() {
-            out = out.sum_dim(0);
-        }
-
-        out
+        apply_tensor_op(
+            |ops: &[&TensorStorage; 1]| TensorStorage::sum_all(ops[0]),
+            Some(|operands: [GraphTensor; 1]| {
+                Box::new(BackwardSum {
+                    operands,
+                    op: SumOp {},
+                }) as Box<dyn GradFnTrait>
+            }),
+            &[self],
+        )
     }
 
     pub fn mean_dim(
@@ -54,13 +57,24 @@ impl GraphTensor {
         &self
     ) -> GraphTensor {
 
-        let mut out = self.copy_s();
+        &self.sum() / (self.numel() as f64)
+    }
 
-        for _ in 0..self.shape().len() {
-            out = out.mean_dim(0);
-        }
+    pub fn max_dim(
+        &self,
+        dim: usize,
+    ) -> GraphTensor {
 
-        out
+        apply_tensor_op(
+            |ops: &[&TensorStorage; 1]| TensorStorage::max_dim(ops[0], dim),
+            Some(|operands: [GraphTensor; 1]| {
+                Box::new(BackwardMaxDim {
+                    operands,
+                    op: MaxDimOp { dim },
+                }) as Box<dyn GradFnTrait>
+            }),
+            &[self],
+        )
     }
 
     pub fn argmax(
@@ -89,7 +103,11 @@ impl GraphTensor {
 
         let mut out_storage = TensorStorage::new(out_shape, 0.0); // TODO see if you can have this uninit
 
-        // Helper: convert logical index -> multi-dim coordinates for input
+        // `out_storage` is freshly allocated, so its Rc is unique and mutable.
+        let out_buf = Rc::get_mut(&mut out_storage.buffer).unwrap();
+
+        // The output is contiguous with the input coords followed by the class dim,
+        // so the flat output index of (input logical index i, class cls) is i*num_classes + cls.
         for i in 0..in_numel {
             let raw_value = self.node.storage[i];
             if raw_value.fract() != 0.0 {
@@ -106,24 +124,7 @@ impl GraphTensor {
                 panic!("One-hotting with num_classes={} but tensor has value {} at index {}", num_classes-1, raw_value, i)
             }
 
-            if in_shape.is_empty() {
-                // Scalar input -> output is 1D of length num_classes
-                let out_md = vec![cls];
-                out_storage[&out_md] = 1.0;
-                continue;
-            }
-
-            // compute multi-dim coords for the input logical index
-            let mut in_md = vec![0; in_shape.len()]; // TODO I would like to use with_capacity() here but the reverse() gives mi problems
-            let mut curr = i;
-            for d in (0..=in_shape.len()-1).rev() {
-                in_md[d] = curr % in_shape[d];
-                curr /= in_shape[d];
-            }
-
-            // append class dim
-            in_md.push(cls);
-            out_storage[&in_md] = 1.0;
+            out_buf[i * num_classes + cls] = 1.0;
         }
 
         let out_node = TensorNode {

@@ -30,8 +30,9 @@ impl Optimizer for SGD {
     ) {
         for param in params.values_mut() {
             if let Some(g) = grads_map.get(&param.to_key()) {
-                let delta = &(g * self.base_lr);
-                **param = (&**param - delta).detach(true);
+                // param = param - lr * grad, fused in a single pass
+                let updated = param.sub_scaled(g, self.base_lr).detach(true);
+                **param = updated;
             }
         }
     }

@@ -53,11 +53,10 @@ fn main() {
     // let sum = TensorStorage::sum(&s);
     // dbg!(sum);
 
-    // test_complex_operation()
-    // test_simple_operation()
+    // test_complex_operation();
+    // test_simple_operation();
 
     // test_shapes();
-    // test_sum_dim();
     // test_one_hot();
     // test_matmul();
 

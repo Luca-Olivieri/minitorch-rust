@@ -3,6 +3,33 @@ use std::{ops::{Index, IndexMut}, rc::Rc};
 
 impl TensorStorage {
 
+    /// Add `other`'s values into `self`'s buffer elementwise, in place.
+    ///
+    /// Returns `false` (without mutating anything) when the accumulation cannot be
+    /// done safely in place: shape mismatch, `self` is a strided view, or the buffer
+    /// is not uniquely owned. Callers should fall back to an allocating `a + b`.
+    pub(crate) fn add_assign(&mut self, other: &TensorStorage) -> bool {
+        if self.shape != other.shape || self.numel != other.numel {
+            return false;
+        }
+
+        // Only contiguous accumulation targets are mutated in place.
+        if !self.contiguous {
+            return false;
+        }
+
+        // The buffer must be uniquely owned to mutate it in place.
+        let Some(buf) = Rc::get_mut(&mut self.buffer) else {
+            return false;
+        };
+
+        for i in 0..self.numel {
+            buf[self.offset + i] += other[i];
+        }
+
+        true
+    }
+
     pub(super) fn md_to_flat(
         &self,
         md_idx: &Vec<usize>
