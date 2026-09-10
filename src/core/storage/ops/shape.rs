@@ -168,6 +168,13 @@ impl TensorStorage {
 
     pub fn broadcast(
         &self,
+        b: &TensorStorage
+    ) -> TensorStorage {
+        Self::broadcast_to_shape(&self, &b.shape)
+    }
+
+    pub fn broadcast_to_shape(
+        &self,
         shape: &Vec<usize>
     ) -> TensorStorage {
         if !self.is_broadcastable(&shape) {
