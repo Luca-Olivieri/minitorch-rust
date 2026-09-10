@@ -14,8 +14,8 @@ impl Forward1 for ReLU {
         &self,
         input: &GraphTensor
     ) -> GraphTensor {
-        let ones = GraphTensor::new(input.shape().clone(), 0.0, false); // TODO substitute with tensor broadcasted from f64 value of 1.0
-        GraphTensor::maximum(input, &ones)
+        let zeros = GraphTensor::new(input.shape().clone(), 0.0, false); // TODO substitute with tensor broadcasted from f64 value of 1.0
+        GraphTensor::maximum(input, &zeros)
     }
 }
 

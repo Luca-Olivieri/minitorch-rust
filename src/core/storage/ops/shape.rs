@@ -1,4 +1,5 @@
 use std::rc::Rc;
+use crate::core::storage::compute_numel_from_shape;
 
 use crate::core::storage::TensorStorage;
 
@@ -163,6 +164,67 @@ impl TensorStorage {
         }
 
         TensorStorage::from_buffer(out_shape, out_buf)
+    }
+
+    pub fn broadcast(
+        &self,
+        shape: &Vec<usize>
+    ) -> TensorStorage {
+        if !self.is_broadcastable(&shape) {
+            panic!("Shape {:?} cannot be broadcasted to {:?}", &self.shape, &shape);
+        }
+
+        // Prepend 1s to align dimensions from the right (NumPy convention)
+        let ndim_diff = shape.len() as isize - self.shape.len() as isize;
+        let mut out_shape = self.shape.clone();
+        let mut out_strides = self.strides.clone();
+
+        for _ in 0..ndim_diff {
+            out_shape.insert(0, 1);
+            out_strides.insert(0, 0);
+        }
+
+        // Broadcast singleton dims (right-aligned now)
+        let mut out_contiguous = true;
+        for d in 0..shape.len() {
+            if out_shape[d] == 1 && out_shape[d] != shape[d] {
+                out_strides[d] = 0;
+                out_contiguous = false;
+                out_shape[d] = shape[d];
+            }
+        }
+
+        // make a view: share the underlying flat data and keep the same offset
+        Self {
+            buffer: Rc::clone(&self.buffer),
+            shape: out_shape,
+            strides: out_strides,
+            contiguous: out_contiguous,
+            numel: compute_numel_from_shape(shape),
+            offset: self.offset,
+        }
+    }
+
+    fn is_broadcastable(
+        &self,
+        shape: &Vec<usize>
+    ) -> bool {
+        let ndim_diff = self.shape.len() as isize - shape.len() as isize;
+
+        // source has more dims than target: extra source dims must be 1
+        if ndim_diff > 0 {
+            for d in 0..(ndim_diff as usize) {
+                if self.shape[d] != 1 {
+                    return false;
+                }
+            }
+        }
+
+        let offset = self.shape.len().abs_diff(shape.len());
+        let shorter = if ndim_diff >= 0 { shape } else { &self.shape };
+        let longer = if ndim_diff >= 0 { &self.shape } else { shape };
+
+        shorter.iter().zip(longer.iter().skip(offset)).all(|(a, b)| a == b || *a == 1 || *b == 1)
     }
 }
 
