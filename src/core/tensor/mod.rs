@@ -244,4 +244,41 @@ mod tests {
             vec![3.0]
         ], false);
     }
+
+    #[test]
+    fn is_close_within_tolerance() {
+        let a = GraphTensor::from_vec(vec![1.0, 1.0, 1.0], false);
+        let b = GraphTensor::from_vec(vec![0.999999, 1.0, 1.1], false);
+        let r = a.is_close(&b);
+        assert_eq!(*r.at(&vec![0]), 1.0);
+        assert_eq!(*r.at(&vec![1]), 1.0);
+        assert_eq!(*r.at(&vec![2]), 0.0);
+    }
+
+    #[test]
+    fn is_close_with_explicit_tolerances() {
+        let a = GraphTensor::from_vec(vec![10.0], false);
+        let b = GraphTensor::from_vec(vec![10.0 + 1e-3], false);
+        assert_eq!(*a.is_close(&b).at(&vec![0]), 0.0);
+        assert_eq!(*a.is_close_with(&b, 1e-4, 0.0).at(&vec![0]), 1.0);
+    }
+
+    #[test]
+    fn is_close_broadcasts() {
+        let a = GraphTensor::from_vec(vec![1.0, 2.0, 3.0], false);
+        let b = GraphTensor::from_vec(1.0, false);
+        let r = a.is_close(&b);
+        assert_eq!(r.shape(), &vec![3]);
+        assert_eq!(*r.at(&vec![0]), 1.0);
+        assert_eq!(*r.at(&vec![1]), 0.0);
+        assert_eq!(*r.at(&vec![2]), 0.0);
+    }
+
+    #[test]
+    fn is_close_nan_not_equal() {
+        let a = GraphTensor::from_vec(vec![f64::NAN], false);
+        let b = GraphTensor::from_vec(vec![f64::NAN], false);
+        let r = a.is_close(&b);
+        assert_eq!(*r.at(&vec![0]), 0.0);
+    }
 }
