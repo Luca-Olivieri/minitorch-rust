@@ -22,7 +22,8 @@ macro_rules! timeit {
 }
 
 fn main() {
-    try_covertype();
+    // try_covertype();
+    try_xor();
 }
 
 fn try_covertype() {

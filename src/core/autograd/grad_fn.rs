@@ -64,3 +64,46 @@ impl<Op: GradRule<N>, const N: usize> ComputesGrads for NBackwardOp<Op, N> {
         }
     }
 }
+
+/// Reduce an upstream gradient back to the shape of the tensor it belongs to.
+///
+/// The forward op broadcasts its operands to a common shape, so the gradient
+/// arriving at an operand may be (strictly) larger than the operand itself.
+/// The gradient of a broadcast is a sum along every axis that was expanded,
+/// i.e. every axis where the operand's aligned dimension is 1 but the gradient's
+/// is larger.
+///
+/// `sum_dim` removes the reduced axis, so the axis is re-inserted (keepdim) to
+/// keep positions stable while iterating, and any leading axes that only existed
+/// because the target shape was rank-deficient are squeezed away at the end.
+/// When `in_grad` already has `target_shape`, this is a no-op (just re-shares the node).
+pub fn reduce_grad_to_shape(
+    in_grad: &GraphTensor,
+    target_shape: &[usize],
+) -> GraphTensor {
+    let bs = in_grad.shape();
+    if bs.as_slice() == target_shape {
+        // Deep-copy: the caller clears `grad_fn` on the result in place, which
+        // requires an exclusively-owned node (the shared seed grad must not be).
+        return in_grad.copy_d();
+    }
+
+    let nd = bs.len() - target_shape.len();
+
+    // Right-align the target shape (NumPy convention): prepend the missing dims.
+    let mut aligned = vec![1usize; nd];
+    aligned.extend_from_slice(target_shape);
+
+    let mut g = in_grad.copy_s();
+    for d in (0..bs.len()).rev() {
+        if aligned[d] == 1 && bs[d] > 1 {
+            g = g.sum_dim(d).unsqueeze(d);
+        }
+    }
+
+    // Remove the leading dims that only existed because the target was rank-deficient.
+    for _ in 0..nd {
+        g = g.squeeze(0);
+    }
+    g
+}

@@ -124,7 +124,7 @@ impl TensorStorage {
             buffer: Rc::clone(&a.buffer),
             shape: out_shape,
             strides: out_strides,
-            contiguous: out_contiguous,
+            contiguous: out_contiguous && a.contiguous,
             numel: a.numel*times,
             offset: a.offset,
         }
@@ -206,7 +206,9 @@ impl TensorStorage {
             buffer: Rc::clone(&self.buffer),
             shape: out_shape,
             strides: out_strides,
-            contiguous: out_contiguous,
+            // The result is contiguous only if the source was AND this call did
+            // not stretch any dimension; otherwise `offset + i` indexing is invalid.
+            contiguous: out_contiguous && self.contiguous,
             numel: compute_numel_from_shape(shape),
             offset: self.offset,
         }

@@ -103,23 +103,11 @@ impl GradRule<1> for BroadcastOp {
         in_grad: &GraphTensor,
         out: &mut Vec<Option<GraphTensor>>
     ) {
+        // The forward op produced `in_grad.shape()` from an operand of shape
+        // `self.old_shape`; the gradient is the sum of `in_grad` over every
+        // axis that broadcasting expanded.
         out.push(operands[0].requires_grad().then(|| {
-            let new_shape = in_grad.shape();
-            let old_shape = &self.old_shape;
-
-            // Prepend 1s to old_shape so it has the same ndim as new_shape (NumPy convention)
-            let mut aligned_old = vec![1usize; new_shape.len() - old_shape.len()];
-            aligned_old.extend_from_slice(old_shape);
-
-            let mut g = in_grad.copy_s();
-            // Sum over every dimension that was broadcast (old=1, new>1), right to left
-            // to avoid index shifting issues
-            for d in (0..new_shape.len()).rev() {
-                if aligned_old[d] == 1 && new_shape[d] > 1 {
-                    g = g.sum_dim(d);
-                }
-            }
-            g
+            reduce_grad_to_shape(in_grad, &self.old_shape)
         }));
     }
 }

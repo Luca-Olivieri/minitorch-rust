@@ -131,8 +131,8 @@ impl GradRule<2> for AddOp {
         in_grad: &GraphTensor,
         out: &mut Vec<Option<GraphTensor>>
     ) {
-        out.push(operands[0].requires_grad().then(|| in_grad.copy_d()));
-        out.push(operands[1].requires_grad().then(|| in_grad.copy_d()));
+        out.push(operands[0].requires_grad().then(|| reduce_grad_to_shape(in_grad, operands[0].shape())));
+        out.push(operands[1].requires_grad().then(|| reduce_grad_to_shape(in_grad, operands[1].shape())));
     }
 }
 
@@ -147,8 +147,8 @@ impl GradRule<2> for SubOp {
         in_grad: &GraphTensor,
         out: &mut Vec<Option<GraphTensor>>
     ) {
-        out.push(operands[0].requires_grad().then(|| in_grad.copy_d()));
-        out.push(operands[1].requires_grad().then(|| -in_grad));
+        out.push(operands[0].requires_grad().then(|| reduce_grad_to_shape(in_grad, operands[0].shape())));
+        out.push(operands[1].requires_grad().then(|| -&reduce_grad_to_shape(in_grad, operands[1].shape())));
     }
 }
 
@@ -164,8 +164,12 @@ impl GradRule<2> for MulOp {
         out: &mut Vec<Option<GraphTensor>>
     ) {
         // d/dx0 (x0*x1) = in_grad * x1, d/dx1 = in_grad * x0
-        out.push(operands[0].requires_grad().then(|| in_grad * &operands[1]));
-        out.push(operands[1].requires_grad().then(|| in_grad * &operands[0]));
+        out.push(operands[0].requires_grad().then(|| {
+            reduce_grad_to_shape(&(in_grad * &operands[1]), operands[0].shape())
+        }));
+        out.push(operands[1].requires_grad().then(|| {
+            reduce_grad_to_shape(&(in_grad * &operands[0]), operands[1].shape())
+        }));
     }
 }
 
@@ -182,9 +186,13 @@ impl GradRule<2> for DivOp {
         // y = a / b
         // dy/da = 1/b            -> grad_a = in_grad / b
         // dy/db = -a/b^2         -> grad_b = -(in_grad * a) / (b * b)
-        out.push(operands[0].requires_grad().then(|| in_grad / &operands[1]));
+        out.push(operands[0].requires_grad().then(|| {
+            reduce_grad_to_shape(&(in_grad / &operands[1]), operands[0].shape())
+        }));
         out.push(operands[1].requires_grad().then(|| {
-            &-&(in_grad * &operands[0]) / &(&operands[1] * &operands[1])
+            let num = -&(in_grad * &operands[0]);
+            let rhs = &num / &(&operands[1] * &operands[1]);
+            reduce_grad_to_shape(&rhs, operands[1].shape())
         }));
     }
 }
@@ -207,14 +215,16 @@ impl GradRule<2> for PowOp {
 
         out.push(base.requires_grad().then(|| {
             let exp_minus_one = exp - 1.0;
-            &(in_grad * exp) * &base.pow(&exp_minus_one)
+            let rhs = &(in_grad * exp) * &base.pow(&exp_minus_one);
+            reduce_grad_to_shape(&rhs, base.shape())
         }));
 
         out.push(exp.requires_grad().then(|| {
             // ln(b) computed as log base e of b, reusing the log op's convention: a.log(b)
             let ln_base = base.ln();
             let y = base.pow(exp);
-            &(in_grad * &y) * &ln_base
+            let rhs = &(in_grad * &y) * &ln_base;
+            reduce_grad_to_shape(&rhs, exp.shape())
         }));
     }
 }
@@ -235,8 +245,12 @@ impl GradRule<2> for MaximumOp {
         let a = &operands[0];
         let b = &operands[1];
 
-        out.push(a.requires_grad().then(|| in_grad * &a.gte(b)));
-        out.push(b.requires_grad().then(|| in_grad * &a.lt(b))); // TODO implement a NOT operator
+        out.push(a.requires_grad().then(|| {
+            reduce_grad_to_shape(&(in_grad * &a.gte(b)), a.shape())
+        }));
+        out.push(b.requires_grad().then(|| {
+            reduce_grad_to_shape(&(in_grad * &a.lt(b)), b.shape()) // TODO implement a NOT operator
+        }));
     }
 }
 

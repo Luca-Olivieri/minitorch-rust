@@ -25,7 +25,7 @@ impl GraphTensor {
     pub fn norm(
         &self,
     ) -> f64 {
-        let twos = GraphTensor::new(self.shape().clone(), 2.0, false);
+        let twos = GraphTensor::new(vec![], 2.0, false);
         self.pow(&twos).sum().item().sqrt()
     }
     pub fn dist(
@@ -69,12 +69,26 @@ where
     F: Fn(&[&TensorStorage; N]) -> TensorStorage,
     G: FnOnce([GraphTensor; N]) -> Box<dyn GradFnTrait>,
 {
-    let first_operand_shape = &operands[0].node.storage.shape;
-    for o in operands {
-        assert_eq!(first_operand_shape, &o.node.storage.shape);
-    }
+    // NumPy-style right-aligned broadcasting: every operand is expanded to a
+    // common shape (via stride-0 views) before the storage op runs.
+    let target_shape = broadcast_shape(&(*operands).map(|o| &o.node.storage.shape));
 
-    let storages: [&TensorStorage; N] = std::array::from_fn(|i| &operands[i].node.storage);
+    let needs_broadcast = operands
+        .iter()
+        .any(|o| o.node.storage.shape != target_shape);
+
+    // The broadcast views for operands whose shape differs from the common shape.
+    // Declared here so the references in `storages` below outlive the `if` block.
+    let mut owned: Vec<TensorStorage> = Vec::with_capacity(N);
+    let storages: [&TensorStorage; N] = if needs_broadcast {
+        for o in operands {
+            owned.push(o.node.storage.broadcast_to_shape(&target_shape));
+        }
+        std::array::from_fn(|i| &owned[i])
+    } else {
+        std::array::from_fn(|i| &operands[i].node.storage)
+    };
+
     let out_store = op(&storages);
 
     // Only generate a grad_fn if one was provided
@@ -92,6 +106,30 @@ where
     GraphTensor { node: Rc::new(out_node) }
 }
 
+// Compute the result shape of broadcasting all the given shapes together,
+// following NumPy's right-aligned semantics (dimensions of size 1 stretch to
+// the other operand's size; a missing leading dim acts as 1).
+fn broadcast_shape(shapes: &[&Vec<usize>]) -> Vec<usize> {
+    let ndim = shapes.iter().map(|s| s.len()).max().unwrap();
+    let mut out = vec![1usize; ndim];
+
+    for s in shapes {
+        let pad = ndim - s.len();
+        for (i, &dim) in s.iter().enumerate() {
+            let d = pad + i;
+            if out[d] != dim && out[d] != 1 && dim != 1 {
+                panic!(
+                    "Shapes {:?} cannot be broadcast together: dim {} is {} but the common shape requires {}.",
+                    shapes, d, dim, out[d]
+                );
+            }
+            out[d] = out[d].max(dim);
+        }
+    }
+
+    out
+}
+
 // TODO make this scalar operations into a macro
 impl Add<f64> for &GraphTensor {
     type Output = GraphTensor;
@@ -99,7 +137,7 @@ impl Add<f64> for &GraphTensor {
         self,
         other: f64
     ) -> GraphTensor {
-        let other_t = GraphTensor::new(self.shape().clone(), other, false);
+        let other_t = GraphTensor::new(vec![], other, false);
         self + &other_t
     }
 }
@@ -110,7 +148,7 @@ impl Sub<f64> for &GraphTensor {
         self,
         other: f64
     ) -> GraphTensor {
-        let other_t = GraphTensor::new(self.shape().clone(), other, false);
+        let other_t = GraphTensor::new(vec![], other, false);
         self - &other_t
     }
 }
@@ -121,7 +159,7 @@ impl Mul<f64> for &GraphTensor {
         self,
         other: f64
     ) -> GraphTensor {
-        let other_t = GraphTensor::new(self.shape().clone(), other, false);
+        let other_t = GraphTensor::new(vec![], other, false);
         self * &other_t
     }
 }
@@ -132,7 +170,7 @@ impl Div<f64> for &GraphTensor {
         self,
         other: f64
     ) -> GraphTensor {
-        let other_t = GraphTensor::new(self.shape().clone(), other, false);
+        let other_t = GraphTensor::new(vec![], other, false);
         self / &other_t
     }
 }

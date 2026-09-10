@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use rand::rngs::StdRng;
 
-use crate::core::{GraphTensor, nn::module::{Forward1, Module}, tensor::AbstractTensor};
+use crate::core::{GraphTensor, nn::module::{Forward1, Module}};
 
 pub struct Linear {
     pub weight: GraphTensor,
@@ -70,12 +70,11 @@ impl Forward1 for Linear {
     ) -> GraphTensor {
         let mult = GraphTensor::matmul(input, &self.weight);
 
+        // `b` has shape [out_features], `mult` [batch, out_features]: the `+`
+        // broadcasts the bias across the batch dim automatically.
         match &self.bias {
             None => mult,
-            Some(b) => match input.shape().len()  {
-               1 => &mult + b,
-               _ => &mult + &b.unsqueeze(0).expand(0, input.shape()[0])
-            }
+            Some(b) => &mult + b,
         }
     }
 }
