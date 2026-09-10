@@ -6,7 +6,7 @@ use crate::core::node::TensorNode;
 use crate::core::storage::TensorStorage;
 use crate::core::tensor::AbstractTensor;
 
-pub struct CovertypeDataset{
+pub struct CovertypeDataset {
     pub path: String,
     pub len: usize,
     reader: BufReader<File>,
@@ -14,10 +14,7 @@ pub struct CovertypeDataset{
 }
 
 impl CovertypeDataset {
-    pub fn new(
-        path: String,
-        limit: Option<usize>
-    ) -> Self {
+    pub fn new(path: String, limit: Option<usize>) -> Self {
         let file_res = File::open(&path);
         if file_res.is_err() {
             panic!("Could not open file {}", &path);
@@ -31,7 +28,7 @@ impl CovertypeDataset {
             path: path,
             len: limit.unwrap_or_else(|| lut.len()),
             reader: BufReader::new(file),
-            lut: lut
+            lut: lut,
         }
     }
 
@@ -72,11 +69,7 @@ impl CovertypeDataset {
         Ok(index)
     }
 
-    pub fn get_item(
-        &mut self,
-        idx: usize
-    ) -> (GraphTensor, GraphTensor) {
-
+    pub fn get_item(&mut self, idx: usize) -> (GraphTensor, GraphTensor) {
         let seek_res = self.reader.seek(SeekFrom::Start(self.lut[idx]));
         if seek_res.is_err() {
             panic!("Could not seek line at idx {} from LUT", idx);
@@ -88,7 +81,9 @@ impl CovertypeDataset {
             panic!("Could not read line {} of file at path {}", idx, &self.path);
         }
 
-        let mut buffer: Vec<f64> = line.trim_end().split(',')
+        let mut buffer: Vec<f64> = line
+            .trim_end()
+            .split(',')
             .skip(1) // skip "index" column
             .map(|v| v.parse().unwrap())
             .collect();
@@ -96,7 +91,7 @@ impl CovertypeDataset {
 
         (
             GraphTensor::from_vec(buffer, false),
-            GraphTensor::from_vec(gt, false)
+            GraphTensor::from_vec(gt, false),
         )
     }
 }

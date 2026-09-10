@@ -7,7 +7,11 @@ use crate::core::storage::TensorStorage;
 impl fmt::Display for TensorStorage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Tensor(shape={:?}, dtype=float,\n", self.shape)?; // TODO insert TensorStorage, and fix padding
-        write!(f, "       numel={}, strides={:?}, contiguous={}, offset={},\n", self.numel, self.strides, self.contiguous, self.offset)?;
+        write!(
+            f,
+            "       numel={}, strides={:?}, contiguous={}, offset={},\n",
+            self.numel, self.strides, self.contiguous, self.offset
+        )?;
         write!(f, "       data=")?;
 
         if self.shape.is_empty() {

@@ -1,5 +1,5 @@
-use std::rc::Rc;
 use crate::core::storage::compute_numel_from_shape;
+use std::rc::Rc;
 
 use crate::core::storage::TensorStorage;
 
@@ -11,7 +11,7 @@ impl TensorStorage {
             strides: a.strides.clone(),
             contiguous: a.contiguous,
             numel: a.numel,
-            offset: a.offset
+            offset: a.offset,
         }
     }
 
@@ -22,16 +22,16 @@ impl TensorStorage {
             strides: a.strides.clone(),
             contiguous: a.contiguous,
             numel: a.numel,
-            offset: a.offset
+            offset: a.offset,
         }
     }
 
-    pub fn unsqueeze(
-        a: &TensorStorage,
-        dim: usize
-    ) -> TensorStorage {
+    pub fn unsqueeze(a: &TensorStorage, dim: usize) -> TensorStorage {
         if dim > a.shape.len() {
-            panic!("Unsqueezed dimension {} out of range for shape of length {:?}.", dim, a.shape);
+            panic!(
+                "Unsqueezed dimension {} out of range for shape of length {:?}.",
+                dim, a.shape
+            );
         }
 
         let mut out_strides = a.strides.clone();
@@ -48,16 +48,19 @@ impl TensorStorage {
         }
     }
 
-    pub fn squeeze(
-        a: &TensorStorage,
-        dim: usize
-    ) -> TensorStorage {
+    pub fn squeeze(a: &TensorStorage, dim: usize) -> TensorStorage {
         if dim >= a.shape.len() {
-            panic!("Squeezed dimension {} out of range for shape of length {:?}.", dim, a.shape);
+            panic!(
+                "Squeezed dimension {} out of range for shape of length {:?}.",
+                dim, a.shape
+            );
         }
 
         if a.shape[dim] != 1 {
-            panic!("Squeezed dimension {} must be singleton. Got size {:?}.", dim, a.shape);
+            panic!(
+                "Squeezed dimension {} must be singleton. Got size {:?}.",
+                dim, a.shape
+            );
         }
 
         // remove the stride corresponding to the squeezed dim
@@ -75,9 +78,7 @@ impl TensorStorage {
         }
     }
 
-    pub fn transpose(
-        a: &TensorStorage
-    ) -> TensorStorage {
+    pub fn transpose(a: &TensorStorage) -> TensorStorage {
         if a.shape.len() != 2 {
             panic!("Transpose requires a 2D tensor, got shape {:?}.", a.shape);
         }
@@ -96,17 +97,19 @@ impl TensorStorage {
         }
     }
 
-    pub fn expand(
-        a: &TensorStorage,
-        dim: usize,
-        times: usize
-    ) -> TensorStorage {
+    pub fn expand(a: &TensorStorage, dim: usize, times: usize) -> TensorStorage {
         if dim >= a.shape.len() {
-            panic!("Expanded dimension {} out of range for shape of length {:?}.", dim, a.shape);
+            panic!(
+                "Expanded dimension {} out of range for shape of length {:?}.",
+                dim, a.shape
+            );
         }
 
         if a.shape[dim] != 1 {
-            panic!("Expanded dimension {} must be singleton. Got size {:?}.", dim, a.shape);
+            panic!(
+                "Expanded dimension {} must be singleton. Got size {:?}.",
+                dim, a.shape
+            );
         }
 
         let mut out_shape = a.shape.clone();
@@ -125,7 +128,7 @@ impl TensorStorage {
             shape: out_shape,
             strides: out_strides,
             contiguous: out_contiguous && a.contiguous,
-            numel: a.numel*times,
+            numel: a.numel * times,
             offset: a.offset,
         }
     }
@@ -166,19 +169,16 @@ impl TensorStorage {
         TensorStorage::from_buffer(out_shape, out_buf)
     }
 
-    pub fn broadcast(
-        &self,
-        b: &TensorStorage
-    ) -> TensorStorage {
+    pub fn broadcast(&self, b: &TensorStorage) -> TensorStorage {
         Self::broadcast_to_shape(&self, &b.shape)
     }
 
-    pub fn broadcast_to_shape(
-        &self,
-        shape: &Vec<usize>
-    ) -> TensorStorage {
+    pub fn broadcast_to_shape(&self, shape: &Vec<usize>) -> TensorStorage {
         if !self.is_broadcastable(&shape) {
-            panic!("Shape {:?} cannot be broadcasted to {:?}", &self.shape, &shape);
+            panic!(
+                "Shape {:?} cannot be broadcasted to {:?}",
+                &self.shape, &shape
+            );
         }
 
         // Prepend 1s to align dimensions from the right (NumPy convention)
@@ -214,10 +214,7 @@ impl TensorStorage {
         }
     }
 
-    fn is_broadcastable(
-        &self,
-        shape: &Vec<usize>
-    ) -> bool {
+    fn is_broadcastable(&self, shape: &Vec<usize>) -> bool {
         let ndim_diff = self.shape.len() as isize - shape.len() as isize;
 
         // source has more dims than target: extra source dims must be 1
@@ -233,23 +230,20 @@ impl TensorStorage {
         let shorter = if ndim_diff >= 0 { shape } else { &self.shape };
         let longer = if ndim_diff >= 0 { &self.shape } else { shape };
 
-        shorter.iter().zip(longer.iter().skip(offset)).all(|(a, b)| a == b || *a == 1 || *b == 1)
+        shorter
+            .iter()
+            .zip(longer.iter().skip(offset))
+            .all(|(a, b)| a == b || *a == 1 || *b == 1)
     }
 }
 
-fn unsqueeze_shape(
-    shape: &Vec<usize>,
-    dim: usize
-) -> Vec<usize> {
+fn unsqueeze_shape(shape: &Vec<usize>, dim: usize) -> Vec<usize> {
     let mut out_shape = shape.clone();
     out_shape.insert(dim, 1);
     out_shape
 }
 
-pub(crate) fn squeeze_shape(
-    shape: &Vec<usize>,
-    dim: usize
-) -> Vec<usize> {
+pub(crate) fn squeeze_shape(shape: &Vec<usize>, dim: usize) -> Vec<usize> {
     let mut out_shape = shape.clone();
     out_shape.remove(dim);
     out_shape

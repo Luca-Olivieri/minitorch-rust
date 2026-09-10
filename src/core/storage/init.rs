@@ -1,16 +1,11 @@
 use std::rc::Rc;
 
 use crate::core::storage::*;
-use rand::rngs::StdRng;
 use rand::distr::{Distribution, Uniform};
-
+use rand::rngs::StdRng;
 
 impl TensorStorage {
-
-    pub fn init_xavier_uniform(
-        shape: Vec<usize>,
-        mut rng: StdRng
-    ) -> Self {
+    pub fn init_xavier_uniform(shape: Vec<usize>, mut rng: StdRng) -> Self {
         if !are_dims_positive(&shape) {
             panic!("Tensor shape must have positive dimensions. Got {shape:?}.")
         }
@@ -19,9 +14,7 @@ impl TensorStorage {
         let limit = (6.0 / (shape[0] + shape[1]) as f64).sqrt();
         let dist = Uniform::new(-limit, limit).unwrap(); // TODO: proper error handling
 
-        let buffer: Vec<f64> = (0..numel)
-            .map(|_| dist.sample(&mut rng))
-            .collect();
+        let buffer: Vec<f64> = (0..numel).map(|_| dist.sample(&mut rng)).collect();
 
         Self {
             buffer: Rc::new(buffer),

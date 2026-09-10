@@ -41,6 +41,7 @@ pub trait GradRule<const N: usize> {
         &self, // <-- Added `&self` to access struct fields
         operands: &[GraphTensor; N],
         in_grad: &GraphTensor,
+        retain_graph: bool,
         out: &mut Vec<Option<GraphTensor>>,
     );
 }
@@ -53,7 +54,8 @@ impl<Op: GradRule<N>, const N: usize> ComputesGrads for NBackwardOp<Op, N> {
         out: &mut Vec<Option<GraphTensor>>,
     ) {
         out.clear();
-        self.op.compute_grad(&self.operands, in_grad, out);
+        self.op
+            .compute_grad(&self.operands, in_grad, retain_graph, out);
 
         if !retain_graph {
             for grad in out.iter_mut() {
@@ -76,15 +78,22 @@ impl<Op: GradRule<N>, const N: usize> ComputesGrads for NBackwardOp<Op, N> {
 /// `sum_dim` removes the reduced axis, so the axis is re-inserted (keepdim) to
 /// keep positions stable while iterating, and any leading axes that only existed
 /// because the target shape was rank-deficient are squeezed away at the end.
-/// When `in_grad` already has `target_shape`, this is a no-op (just re-shares the node).
+/// When `in_grad` already has `target_shape`, this is a no-op.
 pub fn reduce_grad_to_shape(
     in_grad: &GraphTensor,
     target_shape: &[usize],
+    retain_graph: bool,
 ) -> GraphTensor {
     let bs = in_grad.shape();
     if bs.as_slice() == target_shape {
-        // Deep-copy: the caller clears `grad_fn` on the result in place, which
-        // requires an exclusively-owned node (the shared seed grad must not be).
+        // On the higher-order path the graph structure is preserved, so the
+        // operand gradient can simply share `in_grad`'s node (no allocation).
+        if retain_graph {
+            return in_grad.copy_s();
+        }
+        // First-order path: deep-copy, because the caller clears `grad_fn` on
+        // the result in place, which requires an exclusively-owned node (the
+        // shared seed grad must not be mutated).
         return in_grad.copy_d();
     }
 

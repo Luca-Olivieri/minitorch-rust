@@ -1,9 +1,6 @@
 use crate::core::storage::TensorStorage;
 
-pub fn apply_op<F, const N: usize>(
-    operands: &[&TensorStorage; N],
-    op: F
-) -> TensorStorage
+pub fn apply_op<F, const N: usize>(operands: &[&TensorStorage; N], op: F) -> TensorStorage
 where
     F: Fn([f64; N]) -> f64, // TODO should I pass this slice as a reference?
 {

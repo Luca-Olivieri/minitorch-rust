@@ -5,10 +5,23 @@ mod models;
 use core::GraphTensor;
 use std::time::Instant;
 
-use crate::{core::{nn::{activate::{ReLU, Softmax}, compute::Linear, loss::{CrossEntropyLoss, Loss}, module::{Forward1, Module}, optimizer::{Optimizer, SGD}}, tensor::{AbstractTensor, FreeTensor}}, data::{dataset::CovertypeDataset, dataloader::DataLoader}, models::{CovertypeClassifier, XORClassifier}};
+use crate::{
+    core::{
+        nn::{
+            activate::{ReLU, Softmax},
+            compute::Linear,
+            loss::{CrossEntropyLoss, Loss},
+            module::{Forward1, Module},
+            optimizer::{Optimizer, SGD},
+        },
+        tensor::{AbstractTensor, FreeTensor},
+    },
+    data::{dataloader::DataLoader, dataset::CovertypeDataset},
+    models::{CovertypeClassifier, XORClassifier},
+};
 
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 macro_rules! timeit {
     ($fmt:literal; $($stmt:stmt)*) => {
@@ -27,13 +40,11 @@ fn main() {
 }
 
 fn try_covertype() {
-
     timeit!("Datasets set up (took {elapsed} s)";
     let limit = 100;
     let train_ds = CovertypeDataset::new(String::from("/Users/lucaolivieri/Desktop/CS/coding/C++/minitorch/data/covertype_train.csv"), Some(limit));
     let val_ds = CovertypeDataset::new(String::from("/Users/lucaolivieri/Desktop/CS/coding/C++/minitorch/data/covertype_train.csv"), Some(limit));
     );
-
 
     timeit!("Dataloaders set up (took {elapsed} s)";
     let batch_size = 4;
@@ -55,7 +66,6 @@ fn try_covertype() {
     let num_epochs = 2;
 
     for epoch in 0..num_epochs {
-
         train_loader.reshuffle();
 
         let mut epoch_loss = 0.0;
@@ -97,11 +107,13 @@ fn try_covertype() {
             }
         });
 
-        if (epoch+1) % 2 == 0 {
-            println!("=== [EPOCH {epoch}] avg loss = {} over {num_steps} steps ===", epoch_loss / num_steps as f64);
+        if (epoch + 1) % 2 == 0 {
+            println!(
+                "=== [EPOCH {epoch}] avg loss = {} over {num_steps} steps ===",
+                epoch_loss / num_steps as f64
+            );
         }
     }
-
 }
 
 fn try_xor() {
@@ -140,7 +152,6 @@ fn try_xor() {
     println!("{}", &model.forward(&inputs).get_node().storage);
 
     for epoch in 0..num_epochs {
-
         let start = Instant::now();
         let logits = model.forward(&inputs);
         let forward_time = start.elapsed();
@@ -166,7 +177,14 @@ fn try_xor() {
         if epoch % 10 == 0 {
             let prs = softmax.forward(&logits);
             println!("=== [EPOCH {epoch}] === ");
-            dbg!(forward_time, loss_time, backward_time, step_time, GraphTensor::dist(&prs, &gts_oh), grads_map.len());
+            dbg!(
+                forward_time,
+                loss_time,
+                backward_time,
+                step_time,
+                GraphTensor::dist(&prs, &gts_oh),
+                grads_map.len()
+            );
         }
     }
 
@@ -175,11 +193,9 @@ fn try_xor() {
 
     // println!("{}", &logits.argmax(1).get_node().storage);
     // println!("{}", &gts_oh.argmax(1).get_node().storage);
-
 }
 
 fn test_complex_operation() {
-
     let shape = vec![1, 2, 3];
 
     let a = GraphTensor::new(shape.clone(), 2.0, true);
@@ -196,19 +212,19 @@ fn test_complex_operation() {
     let q = p.ln();
     let r = -&q;
 
-    let grads_map = r.backward(false);
+    let grads_map = r.backward(true);
 
-    println!( "============ r ============");
+    println!("============ r ============");
     dbg!(&r.get_node().storage);
-    println!( "========== a.grad =========");
+    println!("========== a.grad =========");
     let da = grads_map.get(&a.to_key()).unwrap();
     dbg!(&da.get_node().storage);
 
-    println!( "========== b.grad =========");
+    println!("========== b.grad =========");
     let db = grads_map.get(&b.to_key()).unwrap();
     dbg!(&db.get_node().storage);
 
-    println!( "========== c.grad =========");
+    println!("========== c.grad =========");
     let dc = grads_map.get(&c.to_key()).unwrap();
     dbg!(&dc.get_node().storage);
 
@@ -216,39 +232,38 @@ fn test_complex_operation() {
     let db_grads_map = db.backward(true);
     let dc_grads_map = dc.backward(true);
 
-    println!( "========== d2a_da =========");
+    println!("========== d2a_da =========");
     let d2a_da = da_grads_map.get(&a.to_key()).unwrap();
     dbg!(&d2a_da.get_node().storage);
-    println!( "========== d2a_db =========");
+    println!("========== d2a_db =========");
     let d2a_db = da_grads_map.get(&b.to_key()).unwrap();
     dbg!(&d2a_db.get_node().storage);
-    println!( "========== d2a_dc =========");
+    println!("========== d2a_dc =========");
     let d2a_dc = da_grads_map.get(&c.to_key()).unwrap();
     dbg!(&d2a_dc.get_node().storage);
 
-    println!( "========== d2b_da =========");
+    println!("========== d2b_da =========");
     let d2b_da = db_grads_map.get(&a.to_key()).unwrap();
     dbg!(&d2b_da.get_node().storage);
-    println!( "========== d2b_db =========");
+    println!("========== d2b_db =========");
     let d2b_db = db_grads_map.get(&b.to_key()).unwrap();
     dbg!(&d2b_db.get_node().storage);
-    println!( "========== d2b_dc =========");
+    println!("========== d2b_dc =========");
     let d2b_dc = db_grads_map.get(&c.to_key()).unwrap();
     dbg!(&d2b_dc.get_node().storage);
 
-    println!( "========== d2c_da =========");
+    println!("========== d2c_da =========");
     let d2c_da = dc_grads_map.get(&a.to_key()).unwrap();
     dbg!(&d2c_da.get_node().storage);
-    println!( "========== d2c_db =========");
+    println!("========== d2c_db =========");
     let d2c_db = dc_grads_map.get(&b.to_key()).unwrap();
     dbg!(&d2c_db.get_node().storage);
-    println!( "========== d2c_dc =========");
+    println!("========== d2c_dc =========");
     let d2c_dc = dc_grads_map.get(&c.to_key()).unwrap();
     dbg!(&d2c_dc.get_node().storage);
 }
 
 fn test_simple_operation() {
-
     let shape = vec![1, 2, 3];
 
     let a = GraphTensor::new(shape.clone(), 2.0, true);
@@ -256,21 +271,21 @@ fn test_simple_operation() {
 
     let x = &a * &b;
 
-    let grads_map = x.backward(false);
+    let grads_map = x.backward(true);
 
-    println!( "============ r ============");
+    println!("============ r ============");
     dbg!(&x.get_node().storage);
-    println!( "========== a.grad =========");
+    println!("========== a.grad =========");
     let da = grads_map.get(&a.to_key()).unwrap();
     dbg!(&da.get_node().storage);
 
-    println!( "========== b.grad =========");
+    println!("========== b.grad =========");
     let db = grads_map.get(&b.to_key()).unwrap();
     dbg!(&db.get_node().storage);
 
     let da_grads_map = da.backward(true);
 
-    println!( "========== da.grad =========");
+    println!("========== da.grad =========");
     if let Some(d2a_da) = da_grads_map.get(&a.to_key()) {
         dbg!(&d2a_da.get_node().storage);
     } else {
@@ -279,7 +294,6 @@ fn test_simple_operation() {
 }
 
 fn test_shapes() {
-
     let shape = vec![4, 2, 1, 3];
 
     let a = GraphTensor::new(shape.clone(), 2.0, true); // [4, 2, 1, 3]
@@ -295,21 +309,21 @@ fn test_shapes() {
 
     let grads_map = e.backward(true);
 
-    println!( "============ r ============");
+    println!("============ r ============");
     dbg!(&e.get_node().storage);
-    println!( "========== a.grad =========");
+    println!("========== a.grad =========");
     let da = grads_map.get(&a.to_key()).unwrap();
     dbg!(&da.get_node().storage);
-    println!( "========== b.grad =========");
+    println!("========== b.grad =========");
     let db = grads_map.get(&b.to_key()).unwrap();
     dbg!(&db.get_node().storage);
-    println!( "========== c.grad =========");
+    println!("========== c.grad =========");
     let dc = grads_map.get(&c.to_key()).unwrap();
     dbg!(&dc.get_node().storage);
-    println!( "========== d.grad =========");
+    println!("========== d.grad =========");
     let dd = grads_map.get(&d.to_key()).unwrap();
     dbg!(&dd.get_node().storage);
-    println!( "========== e.grad =========");
+    println!("========== e.grad =========");
     let de = grads_map.get(&e.to_key()).unwrap();
     dbg!(&de.get_node().storage);
 
@@ -324,7 +338,6 @@ fn test_shapes() {
 }
 
 fn test_one_hot() {
-
     let shape = vec![4, 2];
 
     let mut f = FreeTensor::new(shape.clone(), 2.0, true);
@@ -340,12 +353,11 @@ fn test_one_hot() {
     let a = f.to_graph();
     let oh = a.one_hot(4);
 
-    println!( "============ r ============");
+    println!("============ r ============");
     println!("{}", &oh.get_node().storage);
 }
 
 fn test_matmul() {
-
     let a_shape = vec![2, 3];
     let b_shape = vec![3, 4];
 
@@ -356,19 +368,19 @@ fn test_matmul() {
 
     let grads_map = x.backward(true);
 
-    println!( "============ r ============");
+    println!("============ r ============");
     dbg!(&x.get_node().storage);
-    println!( "========== a.grad =========");
+    println!("========== a.grad =========");
     let da = grads_map.get(&a.to_key()).unwrap();
     dbg!(&da.get_node().storage);
 
-    println!( "========== b.grad =========");
+    println!("========== b.grad =========");
     let db = grads_map.get(&b.to_key()).unwrap();
     dbg!(&db.get_node().storage);
 
     let da_grads_map = da.backward(true);
 
-    println!( "========== da.grad =========");
+    println!("========== da.grad =========");
     if let Some(d2a_da) = da_grads_map.get(&a.to_key()) {
         dbg!(&d2a_da.get_node().storage);
     } else {
@@ -377,7 +389,6 @@ fn test_matmul() {
 }
 
 fn test_linear_relu() {
-
     let rng = StdRng::seed_from_u64(42);
 
     let lin = Linear::new(3, 4, true, rng);
@@ -392,15 +403,15 @@ fn test_linear_relu() {
 
     let grads_map = b.backward(true);
 
-    println!( "============ b ============");
+    println!("============ b ============");
     dbg!(&b.get_node().storage);
-    println!( "========== x.grad =========");
+    println!("========== x.grad =========");
     let dx = grads_map.get(&x.to_key()).unwrap();
     dbg!(&dx.get_node().storage);
 
     let dx_grads_map = dx.backward(true);
 
-    println!( "========== dx.grad =========");
+    println!("========== dx.grad =========");
     if let Some(d2x_dx) = dx_grads_map.get(&x.to_key()) {
         dbg!(&d2x_dx.get_node().storage);
     } else {

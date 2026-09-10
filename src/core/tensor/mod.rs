@@ -1,6 +1,6 @@
 mod indexing;
-pub mod ops;
 pub mod init;
+pub mod ops;
 
 use std::rc::Rc;
 
@@ -13,7 +13,6 @@ pub struct Tensor<'a> {
 }
 
 pub trait AbstractTensor {
-
     fn get_node(&self) -> &TensorNode;
 
     fn get_node_mut(&mut self) -> &mut TensorNode;
@@ -34,22 +33,19 @@ pub trait AbstractTensor {
         self.get_node().requires_grad
     }
 
-    fn set_requires_grad(
-        &mut self,
-        requires_grad: bool
-    ) {
+    fn set_requires_grad(&mut self, requires_grad: bool) {
         let node = self.get_node_mut();
         node.requires_grad = requires_grad;
     }
 }
 
 #[derive(Debug)]
-pub struct FreeTensor { // TODO find a definitive name
+pub struct FreeTensor {
+    // TODO find a definitive name
     node: Box<TensorNode>,
 }
 
 impl AbstractTensor for FreeTensor {
-
     fn get_node(&self) -> &TensorNode {
         &self.node.as_ref()
     }
@@ -60,41 +56,35 @@ impl AbstractTensor for FreeTensor {
 }
 
 impl FreeTensor {
-
-    pub fn new(
-        shape: Vec<usize>,
-        fill_value: f64,
-        requires_grad: bool
-    ) -> Self {
+    pub fn new(shape: Vec<usize>, fill_value: f64, requires_grad: bool) -> Self {
         let node = TensorNode::new(shape, fill_value, requires_grad);
 
-        Self { node: Box::new(node) }
+        Self {
+            node: Box::new(node),
+        }
     }
 
-    pub fn to_graph(
-        self,
-    ) -> GraphTensor {
+    pub fn to_graph(self) -> GraphTensor {
         GraphTensor {
-            node: Rc::from(self.node)
+            node: Rc::from(self.node),
         }
     }
 }
 
 #[derive(Debug)]
 pub struct GraphTensor {
-    pub(super) node: Rc<TensorNode>
+    pub(super) node: Rc<TensorNode>,
 }
 
-impl GraphTensor { // turn this impl and the above one in a macro
+impl GraphTensor {
+    // turn this impl and the above one in a macro
 
-    pub fn new(
-        shape: Vec<usize>,
-        fill_value: f64,
-        requires_grad: bool
-    ) -> Self {
+    pub fn new(shape: Vec<usize>, fill_value: f64, requires_grad: bool) -> Self {
         let node = TensorNode::new(shape, fill_value, requires_grad);
 
-        Self { node: Rc::new(node) }
+        Self {
+            node: Rc::new(node),
+        }
     }
 
     /// Build a `GraphTensor` from an arbitrarily nested `Vec<f64>`.
@@ -105,21 +95,22 @@ impl GraphTensor { // turn this impl and the above one in a macro
     ///
     /// Panics if the nested structure is ragged (children of the same parent
     /// have differing shapes).
-    pub fn from_vec<T: IntoNestedStorage>(
-        data: T,
-        requires_grad: bool
-    ) -> Self {
+    pub fn from_vec<T: IntoNestedStorage>(data: T, requires_grad: bool) -> Self {
         let mut buffer: Vec<f64> = Vec::new();
         let shape = data.collect_into(&mut buffer);
 
         let storage = TensorStorage::from_buffer(shape, buffer);
         let node = TensorNode::from_storage(storage, requires_grad);
 
-        Self { node: Rc::new(node) }
+        Self {
+            node: Rc::new(node),
+        }
     }
 
     pub fn copy_s(&self) -> GraphTensor {
-        Self { node: self.node.clone()}
+        Self {
+            node: self.node.clone(),
+        }
     }
 
     pub fn detach(&self, requires_grad: bool) -> GraphTensor {
@@ -129,7 +120,9 @@ impl GraphTensor { // turn this impl and the above one in a macro
             grad_fn: None,
         };
 
-        Self { node: Rc::new(node) }
+        Self {
+            node: Rc::new(node),
+        }
     }
 }
 
@@ -158,7 +151,9 @@ impl<T: IntoNestedStorage> IntoNestedStorage for Vec<T> {
                 None => child_shape = Some(cs),
                 Some(prev) => {
                     if *prev != cs {
-                        panic!("Ragged nested Vec: children of the same parent have differing shapes.");
+                        panic!(
+                            "Ragged nested Vec: children of the same parent have differing shapes."
+                        );
                     }
                 }
             }
@@ -173,13 +168,13 @@ impl<T: IntoNestedStorage> IntoNestedStorage for Vec<T> {
 }
 
 impl AbstractTensor for GraphTensor {
-
     fn get_node(&self) -> &TensorNode {
         &self.node.as_ref()
     }
 
     fn get_node_mut(&mut self) -> &mut TensorNode {
-        Rc::get_mut(&mut self.node).expect("Failed to obtain mutable reference of GraphTensor with shared ownership.")
+        Rc::get_mut(&mut self.node)
+            .expect("Failed to obtain mutable reference of GraphTensor with shared ownership.")
     }
 }
 
@@ -207,11 +202,7 @@ mod tests {
 
     #[test]
     fn from_vec_2d() {
-        let t = GraphTensor::from_vec(
-            vec![
-                vec![1.0, 2.0],
-                vec![3.0, 4.0]
-            ], false);
+        let t = GraphTensor::from_vec(vec![vec![1.0, 2.0], vec![3.0, 4.0]], false);
         assert_eq!(t.shape(), &vec![2, 2]);
         assert_eq!(*t.at(&vec![1, 0]), 3.0);
         assert_eq!(*t.at(&vec![0, 1]), 2.0);
@@ -220,16 +211,7 @@ mod tests {
     #[test]
     fn from_vec_3d() {
         let t = GraphTensor::from_vec(
-            vec![
-                vec![
-                    vec![1.0],
-                    vec![2.0]
-                ],
-                vec![
-                    vec![3.0],
-                    vec![4.0]
-                ]
-            ],
+            vec![vec![vec![1.0], vec![2.0]], vec![vec![3.0], vec![4.0]]],
             false,
         );
         assert_eq!(t.shape(), &vec![2, 2, 1]);
@@ -239,10 +221,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn from_vec_ragged_panics() {
-        GraphTensor::from_vec(vec![
-            vec![1.0, 2.0],
-            vec![3.0]
-        ], false);
+        GraphTensor::from_vec(vec![vec![1.0, 2.0], vec![3.0]], false);
     }
 
     #[test]

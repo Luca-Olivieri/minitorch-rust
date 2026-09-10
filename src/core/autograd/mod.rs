@@ -1,5 +1,5 @@
-pub mod ops;
 pub mod grad_fn;
+pub mod ops;
 
 use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
@@ -9,12 +9,14 @@ use crate::core::GraphTensor;
 use crate::core::node::TensorNode;
 
 pub struct TensorKey {
-    node: Rc<TensorNode> // TODO or use GraphTensor directly
+    node: Rc<TensorNode>, // TODO or use GraphTensor directly
 }
 
 impl Clone for TensorKey {
     fn clone(&self) -> Self {
-        TensorKey{node: Rc::clone(&self.node)}
+        TensorKey {
+            node: Rc::clone(&self.node),
+        }
     }
 }
 
@@ -33,18 +35,15 @@ impl Hash for TensorKey {
 }
 
 impl GraphTensor {
-
     pub fn to_key(&self) -> TensorKey {
-
-        TensorKey { node: Rc::clone(&self.node) }
+        TensorKey {
+            node: Rc::clone(&self.node),
+        }
     }
 }
 
 impl GraphTensor {
-    pub fn backward(
-        &self,
-        retain_graph: bool
-    ) -> HashMap<TensorKey, GraphTensor> {
+    pub fn backward(&self, retain_graph: bool) -> HashMap<TensorKey, GraphTensor> {
         self.compile_backward().run(retain_graph)
     }
 
@@ -92,7 +91,6 @@ impl BackwardPlan {
         bfs_queue.push_back(seed_idx);
 
         while let Some(u) = bfs_queue.pop_front() {
-
             // do not propagate through nodes that do not require gradients.
             if !nodes[u].node.requires_grad {
                 continue;
@@ -103,7 +101,11 @@ impl BackwardPlan {
                 let Some(grad_fn) = &nodes[u].node.grad_fn else {
                     continue;
                 };
-                grad_fn.get_operands().iter().map(|op| op.copy_s()).collect::<Vec<_>>()
+                grad_fn
+                    .get_operands()
+                    .iter()
+                    .map(|op| op.copy_s())
+                    .collect::<Vec<_>>()
             };
 
             for op in op_graphs.iter() {
@@ -165,7 +167,6 @@ impl BackwardPlan {
         process_queue.push_back(self.seed_idx);
 
         while let Some(u) = process_queue.pop_front() {
-
             // Skip nodes that do not require gradients.
             if !self.nodes[u].node.requires_grad {
                 continue;
@@ -181,7 +182,6 @@ impl BackwardPlan {
             }
 
             for (&v, op_grad_opt) in self.operands[u].iter().zip(self.scratch.iter()) {
-
                 if let Some(op_grad) = op_grad_opt {
                     if self.grads[v].is_some() {
                         accumulate_grad(&mut self.grads, v, op_grad, retain_graph);
@@ -226,7 +226,12 @@ impl BackwardPlan {
 /// in place, skipping the allocation and the graph node entirely. Fall back to
 /// the allocating sum when the buffer cannot be mutated (shared/aliased or
 /// strided).
-fn accumulate_grad(grads: &mut Vec<Option<GraphTensor>>, v: usize, op_grad: &GraphTensor, retain_graph: bool) {
+fn accumulate_grad(
+    grads: &mut Vec<Option<GraphTensor>>,
+    v: usize,
+    op_grad: &GraphTensor,
+    retain_graph: bool,
+) {
     if retain_graph {
         let a = grads[v].as_ref().unwrap();
         let sum = a + op_grad;

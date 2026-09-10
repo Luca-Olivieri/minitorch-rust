@@ -21,7 +21,10 @@ macro_rules! impl_tensor_binary_op {
                 apply_tensor_op(
                     |ops: &[&TensorStorage; 2]| $storage_fn(&[ops[0], ops[1]]),
                     Some(|operands: [GraphTensor; 2]| {
-                        Box::new($grad_fn { operands, op: $grad_rule}) as Box<dyn GradFnTrait>
+                        Box::new($grad_fn {
+                            operands,
+                            op: $grad_rule,
+                        }) as Box<dyn GradFnTrait>
                     }),
                     &[self, other],
                 )
@@ -47,7 +50,10 @@ macro_rules! impl_tensor_binary_op {
             apply_tensor_op(
                 |ops: &[&TensorStorage; 2]| $storage_fn(&[ops[0], ops[1]]),
                 Some(|operands: [GraphTensor; 2]| {
-                    Box::new($grad_fn { operands, op: $grad_rule}) as Box<dyn GradFnTrait>
+                    Box::new($grad_fn {
+                        operands,
+                        op: $grad_rule,
+                    }) as Box<dyn GradFnTrait>
                 }),
                 &[self, other],
             )
@@ -88,7 +94,10 @@ macro_rules! impl_tensor_unary_op {
                 apply_tensor_op(
                     |ops: &[&TensorStorage; 1]| $storage_fn(&[ops[0]]),
                     Some(|operands: [GraphTensor; 1]| {
-                        Box::new($grad_fn { operands, op: $grad_rule }) as Box<dyn GradFnTrait>
+                        Box::new($grad_fn {
+                            operands,
+                            op: $grad_rule,
+                        }) as Box<dyn GradFnTrait>
                     }),
                     &[self],
                 )
@@ -114,7 +123,10 @@ macro_rules! impl_tensor_unary_op {
             apply_tensor_op(
                 |ops: &[&TensorStorage; 1]| $storage_fn(&[ops[0]]),
                 Some(|operands: [GraphTensor; 1]| {
-                    Box::new($grad_fn { operands, op: $grad_rule }) as Box<dyn GradFnTrait>
+                    Box::new($grad_fn {
+                        operands,
+                        op: $grad_rule,
+                    }) as Box<dyn GradFnTrait>
                 }),
                 &[self],
             )

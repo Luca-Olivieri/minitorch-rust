@@ -2,44 +2,47 @@ use std::collections::HashMap;
 
 use rand::rngs::StdRng;
 
-use crate::core::{GraphTensor, nn::module::{Forward1, Module}};
+use crate::core::{
+    GraphTensor,
+    nn::module::{Forward1, Module},
+};
 
 pub struct Linear {
     pub weight: GraphTensor,
-    pub bias: Option<GraphTensor>
+    pub bias: Option<GraphTensor>,
 }
 
 impl Module for Linear {
-
-    fn params(
-        &self
-    ) -> HashMap<String, &GraphTensor> {
+    fn params(&self) -> HashMap<String, &GraphTensor> {
         let mut out_map = HashMap::new();
         out_map.insert(String::from("weight"), &self.weight);
-        if self.bias.is_none() {
-            out_map.insert(String::from("bias"), self.bias.as_ref().unwrap());
+        if let Some(bias) = &self.bias {
+            out_map.insert(String::from("bias"), bias);
         }
 
         out_map
     }
 
-    fn params_mut(
-        &mut self
-    ) -> HashMap<String, &mut GraphTensor> {
+    fn params_mut(&mut self) -> HashMap<String, &mut GraphTensor> {
         let mut out_map = HashMap::new();
         out_map.insert(String::from("weight"), &mut self.weight);
-        if self.bias.is_none() {
-            out_map.insert(String::from("bias"), self.bias.as_mut().unwrap());
+        if let Some(bias) = &mut self.bias {
+            out_map.insert(String::from("bias"), bias);
         }
 
         out_map
     }
 
-    fn parts_mut(&mut self) -> (HashMap<String, &mut GraphTensor>, HashMap<String, &mut dyn Module>) {
+    fn parts_mut(
+        &mut self,
+    ) -> (
+        HashMap<String, &mut GraphTensor>,
+        HashMap<String, &mut dyn Module>,
+    ) {
         let mut out_params_map = HashMap::new();
         out_params_map.insert(String::from("weight"), &mut self.weight);
-        if self.bias.is_some() {
-            out_params_map.insert(String::from("bias"), self.bias.as_mut().unwrap());
+        if let Some(bias) = &mut self.bias {
+            out_params_map.insert(String::from("bias"), bias);
         }
 
         (out_params_map, HashMap::new())
@@ -47,27 +50,23 @@ impl Module for Linear {
 }
 
 impl Linear {
-    pub fn new(
-        in_features: usize,
-        out_features: usize,
-        has_bias: bool,
-        rng: StdRng
-    ) -> Self {
+    pub fn new(in_features: usize, out_features: usize, has_bias: bool, rng: StdRng) -> Self {
         // Xavier/Glorot uniform initialization to break symmetry between units
         let w_shape = vec![in_features, out_features];
         let weight = GraphTensor::init_xavier_uniform(w_shape, true, rng); // TODO set rng
 
-        let bias = if has_bias { Some(GraphTensor::new(vec![out_features], 0.0, true)) } else { None };
+        let bias = if has_bias {
+            Some(GraphTensor::new(vec![out_features], 0.0, true))
+        } else {
+            None
+        };
 
         Self { weight, bias }
     }
 }
 
 impl Forward1 for Linear {
-    fn forward(
-        &self,
-        input: &GraphTensor
-    ) -> GraphTensor {
+    fn forward(&self, input: &GraphTensor) -> GraphTensor {
         let mult = GraphTensor::matmul(input, &self.weight);
 
         // `b` has shape [out_features], `mult` [batch, out_features]: the `+`

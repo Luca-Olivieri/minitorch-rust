@@ -3,9 +3,7 @@ use crate::core::storage::ops::shape::squeeze_shape;
 
 impl TensorStorage {
     /// Reduce over every dimension in a single pass, yielding a scalar `[]`.
-    pub fn sum_all(
-        a: &TensorStorage
-    ) -> TensorStorage {
+    pub fn sum_all(a: &TensorStorage) -> TensorStorage {
         let total = if a.contiguous {
             a.buffer[a.offset..a.offset + a.numel].iter().sum()
         } else {
@@ -15,24 +13,21 @@ impl TensorStorage {
         TensorStorage::from_buffer(Vec::new(), vec![total])
     }
 
-    pub fn sum_dim(
-        a: &TensorStorage,
-        dim: usize
-    ) -> TensorStorage {
+    pub fn sum_dim(a: &TensorStorage, dim: usize) -> TensorStorage {
         reduce_dim(a, dim, |v| v, |acc, v| acc + v, |acc| acc)
     }
 
-    pub fn max_dim(
-        a: &TensorStorage,
-        dim: usize
-    ) -> TensorStorage {
-        reduce_dim(a, dim, |v| v, |acc, v| if v > acc { v } else { acc }, |acc| acc)
+    pub fn max_dim(a: &TensorStorage, dim: usize) -> TensorStorage {
+        reduce_dim(
+            a,
+            dim,
+            |v| v,
+            |acc, v| if v > acc { v } else { acc },
+            |acc| acc,
+        )
     }
 
-    pub fn argmax(
-        a: &TensorStorage,
-        dim: usize
-    ) -> TensorStorage {
+    pub fn argmax(a: &TensorStorage, dim: usize) -> TensorStorage {
         reduce_dim(
             a,
             dim,
@@ -62,7 +57,10 @@ where
     G: Fn(A) -> f64,
 {
     if dim >= a.shape.len() {
-        panic!("Reduction dimension {} out of range for shape {:?}.", dim, a.shape);
+        panic!(
+            "Reduction dimension {} out of range for shape {:?}.",
+            dim, a.shape
+        );
     }
 
     // build output shape

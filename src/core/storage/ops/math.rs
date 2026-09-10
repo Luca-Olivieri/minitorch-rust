@@ -1,7 +1,7 @@
 use crate::core::storage::TensorStorage;
 
 impl TensorStorage {
-    impl_storage_elemwise_ops!{
+    impl_storage_elemwise_ops! {
         add,     (a, b), a + b;
         neg,     (a), -a;
         sub,     (a, b), a - b;
@@ -17,27 +17,24 @@ impl TensorStorage {
     }
 
     /// out[i] = a[i] - scale * b[i], fused into a single pass.
-    pub fn sub_scaled(
-        a: &TensorStorage,
-        b: &TensorStorage,
-        scale: f64
-    ) -> TensorStorage {
-        crate::core::storage::ops::utils::apply_op(&[a, b], |[av, bv]: [f64; 2]| {
-            av - scale * bv
-        })
+    pub fn sub_scaled(a: &TensorStorage, b: &TensorStorage, scale: f64) -> TensorStorage {
+        crate::core::storage::ops::utils::apply_op(&[a, b], |[av, bv]: [f64; 2]| av - scale * bv)
     }
 
     /// Direct [m,k] x [k,n] -> [m,n] GEMM kernel.
-    pub fn matmul(
-        a: &TensorStorage,
-        b: &TensorStorage
-    ) -> TensorStorage {
+    pub fn matmul(a: &TensorStorage, b: &TensorStorage) -> TensorStorage {
         if a.shape.len() != 2 || b.shape.len() != 2 {
-            panic!("TensorStorage::matmul requires 2D operands, got {:?} and {:?}.", a.shape, b.shape);
+            panic!(
+                "TensorStorage::matmul requires 2D operands, got {:?} and {:?}.",
+                a.shape, b.shape
+            );
         }
 
         if a.shape[1] != b.shape[0] {
-            panic!("matmul inner dimensions must match ({} != {}).", a.shape[1], b.shape[0]);
+            panic!(
+                "matmul inner dimensions must match ({} != {}).",
+                a.shape[1], b.shape[0]
+            );
         }
 
         let m = a.shape[0];

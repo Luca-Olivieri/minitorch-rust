@@ -1,20 +1,16 @@
+use std::ops::{Add, Div, Mul, Neg, Sub};
 use std::rc::Rc;
-use std::ops::{
-    Add,
-    Neg,
-    Sub,
-    Mul,
-    Div,
-};
 
-use crate::core::tensor::{AbstractTensor, GraphTensor};
+use crate::core::autograd::grad_fn::GradFnTrait;
+use crate::core::autograd::ops::math::{
+    AddOp, BackwardAdd, BackwardDiv, BackwardExp, BackwardLn, BackwardMaximum, BackwardMul,
+    BackwardNeg, BackwardPow, BackwardSub, DivOp, ExpOp, LnOp, MaximumOp, MulOp, NegOp, PowOp,
+    SubOp,
+};
 use crate::core::node::TensorNode;
 use crate::core::storage::TensorStorage;
-use crate::core::autograd::grad_fn::GradFnTrait;
 use crate::core::tensor::extract_requires_grad;
-use crate::core::autograd::ops::math::{
-    AddOp, BackwardAdd, BackwardDiv, BackwardExp, BackwardLn, BackwardMaximum, BackwardMul, BackwardNeg, BackwardPow, BackwardSub, DivOp, ExpOp, LnOp, MaximumOp, MulOp, NegOp, PowOp, SubOp
-};
+use crate::core::tensor::{AbstractTensor, GraphTensor};
 
 impl GraphTensor {
     impl_tensor_unary_op!(ln, TensorStorage::ln, BackwardLn, LnOp);
@@ -22,24 +18,14 @@ impl GraphTensor {
     impl_tensor_binary_op!(pow, TensorStorage::pow, BackwardPow, PowOp);
     impl_tensor_binary_op!(maximum, TensorStorage::maximum, BackwardMaximum, MaximumOp);
 
-    pub fn norm(
-        &self,
-    ) -> f64 {
-        let twos = GraphTensor::new(vec![], 2.0, false);
-        self.pow(&twos).sum().item().sqrt()
+    pub fn norm(&self) -> f64 {
+        (self * self).sum().item().sqrt()
     }
-    pub fn dist(
-        a: &GraphTensor,
-        b: &GraphTensor,
-    ) -> f64 {
-        (a-b).norm()
+    pub fn dist(a: &GraphTensor, b: &GraphTensor) -> f64 {
+        (a - b).norm()
     }
 
-    pub fn sub_scaled(
-        &self,
-        other: &GraphTensor,
-        scale: f64
-    ) -> GraphTensor {
+    pub fn sub_scaled(&self, other: &GraphTensor, scale: f64) -> GraphTensor {
         // Computes self - scale * other in a single fused pass (no intermediate).
         apply_tensor_op(
             |ops: &[&TensorStorage; 2]| TensorStorage::sub_scaled(ops[0], ops[1], scale),
@@ -103,7 +89,9 @@ where
         grad_fn: grad_fn_opt,
     };
 
-    GraphTensor { node: Rc::new(out_node) }
+    GraphTensor {
+        node: Rc::new(out_node),
+    }
 }
 
 // Compute the result shape of broadcasting all the given shapes together,
@@ -133,10 +121,7 @@ fn broadcast_shape(shapes: &[&Vec<usize>]) -> Vec<usize> {
 // TODO make this scalar operations into a macro
 impl Add<f64> for &GraphTensor {
     type Output = GraphTensor;
-    fn add(
-        self,
-        other: f64
-    ) -> GraphTensor {
+    fn add(self, other: f64) -> GraphTensor {
         let other_t = GraphTensor::new(vec![], other, false);
         self + &other_t
     }
@@ -144,10 +129,7 @@ impl Add<f64> for &GraphTensor {
 
 impl Sub<f64> for &GraphTensor {
     type Output = GraphTensor;
-    fn sub(
-        self,
-        other: f64
-    ) -> GraphTensor {
+    fn sub(self, other: f64) -> GraphTensor {
         let other_t = GraphTensor::new(vec![], other, false);
         self - &other_t
     }
@@ -155,10 +137,7 @@ impl Sub<f64> for &GraphTensor {
 
 impl Mul<f64> for &GraphTensor {
     type Output = GraphTensor;
-    fn mul(
-        self,
-        other: f64
-    ) -> GraphTensor {
+    fn mul(self, other: f64) -> GraphTensor {
         let other_t = GraphTensor::new(vec![], other, false);
         self * &other_t
     }
@@ -166,10 +145,7 @@ impl Mul<f64> for &GraphTensor {
 
 impl Div<f64> for &GraphTensor {
     type Output = GraphTensor;
-    fn div(
-        self,
-        other: f64
-    ) -> GraphTensor {
+    fn div(self, other: f64) -> GraphTensor {
         let other_t = GraphTensor::new(vec![], other, false);
         self / &other_t
     }

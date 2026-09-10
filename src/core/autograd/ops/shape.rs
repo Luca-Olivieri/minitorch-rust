@@ -1,5 +1,5 @@
-use crate::core::tensor::{AbstractTensor, GraphTensor};
 use crate::core::autograd::grad_fn::*;
+use crate::core::tensor::{AbstractTensor, GraphTensor};
 
 #[derive(Debug)]
 pub struct CopyDOp {}
@@ -11,7 +11,8 @@ impl GradRule<1> for CopyDOp {
         &self,
         operands: &[GraphTensor; 1],
         in_grad: &GraphTensor,
-        out: &mut Vec<Option<GraphTensor>>
+        _retain_graph: bool,
+        out: &mut Vec<Option<GraphTensor>>,
     ) {
         out.push(operands[0].requires_grad().then(|| in_grad.copy_d()));
     }
@@ -29,9 +30,14 @@ impl GradRule<1> for UnsqueezeOp {
         &self,
         operands: &[GraphTensor; 1],
         in_grad: &GraphTensor,
-        out: &mut Vec<Option<GraphTensor>>
+        _retain_graph: bool,
+        out: &mut Vec<Option<GraphTensor>>,
     ) {
-        out.push(operands[0].requires_grad().then(|| in_grad.squeeze(self.dim)));
+        out.push(
+            operands[0]
+                .requires_grad()
+                .then(|| in_grad.squeeze(self.dim)),
+        );
     }
 }
 
@@ -47,9 +53,14 @@ impl GradRule<1> for SqueezeOp {
         &self,
         operands: &[GraphTensor; 1],
         in_grad: &GraphTensor,
-        out: &mut Vec<Option<GraphTensor>>
+        _retain_graph: bool,
+        out: &mut Vec<Option<GraphTensor>>,
     ) {
-        out.push(operands[0].requires_grad().then(|| in_grad.unsqueeze(self.dim)));
+        out.push(
+            operands[0]
+                .requires_grad()
+                .then(|| in_grad.unsqueeze(self.dim)),
+        );
     }
 }
 
@@ -63,7 +74,8 @@ impl GradRule<1> for TransposeOp {
         &self,
         operands: &[GraphTensor; 1],
         in_grad: &GraphTensor,
-        out: &mut Vec<Option<GraphTensor>>
+        _retain_graph: bool,
+        out: &mut Vec<Option<GraphTensor>>,
     ) {
         out.push(operands[0].requires_grad().then(|| in_grad.transpose()));
     }
@@ -81,7 +93,8 @@ impl GradRule<1> for ExpandOp {
         &self,
         operands: &[GraphTensor; 1],
         in_grad: &GraphTensor,
-        out: &mut Vec<Option<GraphTensor>>
+        _retain_graph: bool,
+        out: &mut Vec<Option<GraphTensor>>,
     ) {
         out.push(operands[0].requires_grad().then(|| {
             in_grad.sum_dim(self.dim).unsqueeze(self.dim) // TODO implement a flag to keep the dimension
@@ -101,13 +114,16 @@ impl GradRule<1> for BroadcastOp {
         &self,
         operands: &[GraphTensor; 1],
         in_grad: &GraphTensor,
-        out: &mut Vec<Option<GraphTensor>>
+        retain_graph: bool,
+        out: &mut Vec<Option<GraphTensor>>,
     ) {
         // The forward op produced `in_grad.shape()` from an operand of shape
         // `self.old_shape`; the gradient is the sum of `in_grad` over every
         // axis that broadcasting expanded.
-        out.push(operands[0].requires_grad().then(|| {
-            reduce_grad_to_shape(in_grad, &self.old_shape)
-        }));
+        out.push(
+            operands[0]
+                .requires_grad()
+                .then(|| reduce_grad_to_shape(in_grad, &self.old_shape, retain_graph)),
+        );
     }
 }

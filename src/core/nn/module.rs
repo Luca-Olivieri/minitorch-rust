@@ -5,12 +5,7 @@ use crate::core::{GraphTensor, tensor::AbstractTensor};
 // TODO should Module have both parameters AND modules (not just one of those at a time)?
 
 pub trait Module {
-
-    fn set_requires_grad(
-        &mut self,
-        requires_grad: bool,
-        recursive: bool
-    ) {
+    fn set_requires_grad(&mut self, requires_grad: bool, recursive: bool) {
         for p in self.params_mut().values_mut() {
             p.set_requires_grad(requires_grad);
         }
@@ -32,7 +27,6 @@ pub trait Module {
 
         // then recursively add child modules' parameters
         for (child_mod_name, child_mod) in &self.modules() {
-
             let child_params = child_mod.all_params();
             for (c_mod_name, c_box_mod) in child_params {
                 let mut full_name = String::from(child_mod_name);
@@ -46,8 +40,6 @@ pub trait Module {
 
         out_map
     }
-
-
 
     fn all_params_mut(&mut self) -> HashMap<String, &mut GraphTensor> {
         let mut out_map = HashMap::new();
@@ -70,30 +62,32 @@ pub trait Module {
 
     // To implement for each impl struct
 
-    fn params(
-        &self
-    ) -> HashMap<String, &GraphTensor> { HashMap::new() }
+    fn params(&self) -> HashMap<String, &GraphTensor> {
+        HashMap::new()
+    }
 
-    fn params_mut(
-        &mut self
-    ) -> HashMap<String, &mut GraphTensor> { HashMap::new() }
+    fn params_mut(&mut self) -> HashMap<String, &mut GraphTensor> {
+        HashMap::new()
+    }
 
-    fn modules(
-        &self
-    ) -> HashMap<String, & dyn Module> { HashMap::new() }
+    fn modules(&self) -> HashMap<String, &dyn Module> {
+        HashMap::new()
+    }
 
-    fn modules_mut(
-        &mut self
-    ) -> HashMap<String, &mut dyn Module> { HashMap::new() }
+    fn modules_mut(&mut self) -> HashMap<String, &mut dyn Module> {
+        HashMap::new()
+    }
 
-    fn parts_mut(&mut self) -> (HashMap<String, &mut GraphTensor>, HashMap<String, &mut dyn Module>) {
+    fn parts_mut(
+        &mut self,
+    ) -> (
+        HashMap<String, &mut GraphTensor>,
+        HashMap<String, &mut dyn Module>,
+    ) {
         (HashMap::new(), HashMap::new())
     }
 }
 
 pub trait Forward1 {
-    fn forward(
-        &self,
-        input: &GraphTensor
-    ) -> GraphTensor;
+    fn forward(&self, input: &GraphTensor) -> GraphTensor;
 }

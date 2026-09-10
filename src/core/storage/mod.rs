@@ -1,7 +1,7 @@
-pub mod indexing;
-pub mod ops;
 pub mod format;
+pub mod indexing;
 pub mod init;
+pub mod ops;
 
 use std::rc::Rc;
 
@@ -13,17 +13,12 @@ pub struct TensorStorage {
     pub(super) strides: Vec<usize>,
     pub(super) contiguous: bool,
     pub numel: usize,
-    pub(super) offset: usize
+    pub(super) offset: usize,
 }
 
 impl TensorStorage {
-
     // TODO: might think of a constructor which does not initialize the whole flat_data, so that you can iterate through it when building a new flat_data
-    pub fn new(
-        shape: Vec<usize>,
-        fill_value: f64
-    ) -> Self {
-
+    pub fn new(shape: Vec<usize>, fill_value: f64) -> Self {
         if !are_dims_positive(&shape) {
             panic!("Tensor shape must have positive dimensions. Got {shape:?}.")
         }
@@ -43,18 +38,18 @@ impl TensorStorage {
 
     /// Wrap an already-completely-initialized contiguous buffer into a storage.
     /// The resulting tensor is a contiguous, offset-0 view of `buffer`.
-    pub(crate) fn from_buffer(
-        shape: Vec<usize>,
-        buffer: Vec<f64>
-    ) -> Self {
-
+    pub(crate) fn from_buffer(shape: Vec<usize>, buffer: Vec<f64>) -> Self {
         if !are_dims_positive(&shape) {
             panic!("Tensor shape must have positive dimensions. Got {shape:?}.")
         }
 
         let numel = compute_numel_from_shape(&shape);
         if buffer.len() != numel {
-            panic!("Buffer length {} does not match shape numel {}.", buffer.len(), numel)
+            panic!(
+                "Buffer length {} does not match shape numel {}.",
+                buffer.len(),
+                numel
+            )
         }
 
         let strides = init_strides(&shape);
@@ -83,8 +78,12 @@ impl TensorStorage {
         let contiguous_strides = init_strides(&self.shape);
 
         for i in 0..self.shape.len() {
-            if self.shape[i] == 1 { continue };
-            if self.strides[i] != contiguous_strides[i] { return false; }
+            if self.shape[i] == 1 {
+                continue;
+            };
+            if self.strides[i] != contiguous_strides[i] {
+                return false;
+            }
         }
 
         true
@@ -92,7 +91,10 @@ impl TensorStorage {
 
     fn item(&self) -> f64 {
         if self.numel != 1 {
-            panic!("Cannot call item() on a non-singleton tensor (shape {:?}).", self.shape)
+            panic!(
+                "Cannot call item() on a non-singleton tensor (shape {:?}).",
+                self.shape
+            )
         }
 
         self.buffer[self.offset]

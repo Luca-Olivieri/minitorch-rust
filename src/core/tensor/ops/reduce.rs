@@ -2,37 +2,34 @@ use std::rc::Rc;
 
 use crate::core::GraphTensor;
 
+use crate::core::autograd::grad_fn::GradFnTrait;
 use crate::core::autograd::ops::math::{BackwardMatmul, MatmulOp};
-use crate::core::autograd::ops::reduce::{BackwardMaxDim, BackwardSum, BackwardSumDim, MaxDimOp, SumDimOp, SumOp};
+use crate::core::autograd::ops::reduce::{
+    BackwardMaxDim, BackwardSum, BackwardSumDim, MaxDimOp, SumDimOp, SumOp,
+};
 use crate::core::node::TensorNode;
 use crate::core::storage::TensorStorage;
 use crate::core::tensor::AbstractTensor;
 use crate::core::tensor::ops::math::apply_tensor_op;
-use crate::core::autograd::grad_fn::GradFnTrait;
 
 impl GraphTensor {
-
-    pub fn sum_dim(
-        &self,
-        dim: usize,
-    ) -> GraphTensor {
-
+    pub fn sum_dim(&self, dim: usize) -> GraphTensor {
         apply_tensor_op(
             |ops: &[&TensorStorage; 1]| TensorStorage::sum_dim(ops[0], dim),
             Some(|operands: [GraphTensor; 1]| {
                 Box::new(BackwardSumDim {
                     operands,
-                    op: SumDimOp { dim, original_times: self.shape()[dim] },
+                    op: SumDimOp {
+                        dim,
+                        original_times: self.shape()[dim],
+                    },
                 }) as Box<dyn GradFnTrait>
             }),
             &[self],
         )
     }
 
-    pub fn sum(
-        &self,
-    ) -> GraphTensor {
-
+    pub fn sum(&self) -> GraphTensor {
         apply_tensor_op(
             |ops: &[&TensorStorage; 1]| TensorStorage::sum_all(ops[0]),
             Some(|operands: [GraphTensor; 1]| {
@@ -45,26 +42,15 @@ impl GraphTensor {
         )
     }
 
-    pub fn mean_dim(
-        &self,
-        dim: usize,
-    ) -> GraphTensor {
-
+    pub fn mean_dim(&self, dim: usize) -> GraphTensor {
         &self.sum_dim(dim) / (self.shape()[dim] as f64)
     }
 
-    pub fn mean(
-        &self
-    ) -> GraphTensor {
-
+    pub fn mean(&self) -> GraphTensor {
         &self.sum() / (self.numel() as f64)
     }
 
-    pub fn max_dim(
-        &self,
-        dim: usize,
-    ) -> GraphTensor {
-
+    pub fn max_dim(&self, dim: usize) -> GraphTensor {
         apply_tensor_op(
             |ops: &[&TensorStorage; 1]| TensorStorage::max_dim(ops[0], dim),
             Some(|operands: [GraphTensor; 1]| {
@@ -77,11 +63,7 @@ impl GraphTensor {
         )
     }
 
-    pub fn argmax(
-        &self,
-        dim: usize,
-    ) -> GraphTensor {
-
+    pub fn argmax(&self, dim: usize) -> GraphTensor {
         apply_tensor_op(
             |ops: &[&TensorStorage; 1]| TensorStorage::argmax(ops[0], dim),
             None::<fn([GraphTensor; 1]) -> Box<dyn GradFnTrait>>,
@@ -92,7 +74,7 @@ impl GraphTensor {
     // TODO should I kep all the logic here or place the TensorStorage part in that class?
     pub fn one_hot(
         &self,
-        num_classes: usize // TODO is this the best integer type here?
+        num_classes: usize, // TODO is this the best integer type here?
     ) -> GraphTensor {
         let in_shape = self.shape();
         let in_numel = self.numel();
@@ -121,7 +103,12 @@ impl GraphTensor {
             let cls = raw_value as usize; // TODO is this the best integer type here?
 
             if cls >= num_classes {
-                panic!("One-hotting with num_classes={} but tensor has value {} at index {}", num_classes-1, raw_value, i)
+                panic!(
+                    "One-hotting with num_classes={} but tensor has value {} at index {}",
+                    num_classes - 1,
+                    raw_value,
+                    i
+                )
             }
 
             out_buf[i * num_classes + cls] = 1.0;
@@ -133,13 +120,12 @@ impl GraphTensor {
             grad_fn: None,
         };
 
-        Self { node: Rc::new(out_node) }
+        Self {
+            node: Rc::new(out_node),
+        }
     }
 
-    pub fn matmul(
-        a: &GraphTensor,
-        b: &GraphTensor
-    ) -> GraphTensor {
+    pub fn matmul(a: &GraphTensor, b: &GraphTensor) -> GraphTensor {
         let a_shape = a.shape();
         let b_shape = b.shape();
 
@@ -147,12 +133,23 @@ impl GraphTensor {
         let b_ndim = b_shape.len();
 
         if !((a_ndim == 1 || a_ndim == 2) && (b_ndim == 1 || b_ndim == 2)) {
-            panic!("matmul requires 1D or 2D tensors, got {}D and {}D", a_ndim, b_ndim);
+            panic!(
+                "matmul requires 1D or 2D tensors, got {}D and {}D",
+                a_ndim, b_ndim
+            );
         }
 
         // Convert 1D inputs to 2D views: a [K] -> [1,K], b [K] -> [K,1]
-        let a2 = if a_ndim == 1 { a.unsqueeze(0) } else { a.copy_s() };
-        let b2 = if b_ndim == 1 { b.unsqueeze(1) } else { b.copy_s() };
+        let a2 = if a_ndim == 1 {
+            a.unsqueeze(0)
+        } else {
+            a.copy_s()
+        };
+        let b2 = if b_ndim == 1 {
+            b.unsqueeze(1)
+        } else {
+            b.copy_s()
+        };
 
         let a2_shape = a2.shape(); // [m, k]
         let b2_shape = b2.shape(); // [k, n]
@@ -182,6 +179,8 @@ impl GraphTensor {
             grad_fn,
         };
 
-        GraphTensor { node: Rc::new(out_node) }
+        GraphTensor {
+            node: Rc::new(out_node),
+        }
     }
 }

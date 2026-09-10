@@ -22,12 +22,7 @@ fn num_batches_for(len: usize, batch_size: usize) -> usize {
 }
 
 impl DataLoader {
-    pub fn new(
-        dataset: CovertypeDataset,
-        batch_size: usize,
-        shuffle: bool,
-        seed: u64,
-    ) -> Self {
+    pub fn new(dataset: CovertypeDataset, batch_size: usize, shuffle: bool, seed: u64) -> Self {
         if batch_size == 0 {
             panic!("batch_size must be nonzero.");
         }
@@ -66,10 +61,7 @@ impl DataLoader {
     ///
     /// Each batch stacks the samples along a new leading dimension:
     /// inputs become `[N, 54]` and targets become `[N, ...]`.
-    pub fn get_batch(
-        &mut self,
-        index: usize,
-    ) -> (GraphTensor, GraphTensor) {
+    pub fn get_batch(&mut self, index: usize) -> (GraphTensor, GraphTensor) {
         let start = index * self.batch_size;
         let end = std::cmp::min(start + self.batch_size, self.dataset.len());
 
@@ -80,11 +72,12 @@ impl DataLoader {
             })
             .collect();
 
-        let input_stacks: Vec<GraphTensor> =
-            samples.iter().map(|s| s.0.copy_s()).collect();
-        let target_stacks: Vec<GraphTensor> =
-            samples.iter().map(|s| s.1.copy_s()).collect();
+        let input_stacks: Vec<GraphTensor> = samples.iter().map(|s| s.0.copy_s()).collect();
+        let target_stacks: Vec<GraphTensor> = samples.iter().map(|s| s.1.copy_s()).collect();
 
-        (GraphTensor::stack(&input_stacks), GraphTensor::stack(&target_stacks))
+        (
+            GraphTensor::stack(&input_stacks),
+            GraphTensor::stack(&target_stacks),
+        )
     }
 }
