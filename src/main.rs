@@ -28,7 +28,7 @@ use rand::SeedableRng;
 use rand::rngs::StdRng;
 
 macro_rules! timeit {
-    ($fmt:literal; $($stmt:stmt)*) => {
+    ($fmt:literal; $($stmt:stmt;)*) => {
         let __start = std::time::Instant::now();
 
         $($stmt)*
@@ -121,7 +121,7 @@ fn try_covertype() {
                 println!("=== [EPOCH {epoch_viz}/{num_epochs}] STEP {step_viz}/{num_steps} === "); // TODO implement correctly padded numbers
                 dbg!(forward_time, loss_time, backward_time, step_time, grads_map.len());
             }
-        });
+        };);
 
         if (epoch + 1) % 2 == 0 {
             println!(
