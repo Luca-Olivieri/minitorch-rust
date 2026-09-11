@@ -1,14 +1,18 @@
 use crate::core::autograd::grad_fn::*;
 use crate::core::tensor::{AbstractTensor, GraphTensor};
 
-// TODO there should be no SumDim, there shoulb just one Sum operation, and it should allow to sum over multiple dimension or all dimensions.
+// There is a single Sum op that reduces an arbitrary subset of dimensions; summing
+// over all dimensions or a single dimension are just special cases of it. `dims` are
+// indices into the *input* (pre-reduction) tensor, sorted ascending and de-duplicated.
 
 #[derive(Debug)]
-pub struct SumOp {}
+pub struct SumDimsOp {
+    pub dims: Vec<usize>,
+}
 
-pub type BackwardSum = NBackwardOp<SumOp, 1>;
+pub type BackwardSumDims = NBackwardOp<SumDimsOp, 1>;
 
-impl GradRule<1> for SumOp {
+impl GradRule<1> for SumDimsOp {
     fn compute_grad(
         &self,
         operands: &[GraphTensor; 1],
@@ -17,9 +21,12 @@ impl GradRule<1> for SumOp {
         out: &mut Vec<Option<GraphTensor>>,
     ) {
         out.push(operands[0].requires_grad().then(|| {
+            // Gradient of a sum is the upstream gradient replicated over every
+            // reduced dimension (via stride-0 expand views).
             let mut g = in_grad.copy_s();
-            for (i, &size) in operands[0].shape().iter().enumerate() {
-                g = g.unsqueeze(i).expand(i, size);
+            let shape = operands[0].shape();
+            for &d in &self.dims {
+                g = g.unsqueeze(d).expand(d, shape[d]);
             }
             g
         }));
@@ -27,13 +34,13 @@ impl GradRule<1> for SumOp {
 }
 
 #[derive(Debug)]
-pub struct MaxDimOp {
-    pub dim: usize,
+pub struct MaxDimsOp {
+    pub dims: Vec<usize>,
 }
 
-pub type BackwardMaxDim = NBackwardOp<MaxDimOp, 1>;
+pub type BackwardMaxDims = NBackwardOp<MaxDimsOp, 1>;
 
-impl GradRule<1> for MaxDimOp {
+impl GradRule<1> for MaxDimsOp {
     fn compute_grad(
         &self,
         operands: &[GraphTensor; 1],
@@ -42,40 +49,24 @@ impl GradRule<1> for MaxDimOp {
         out: &mut Vec<Option<GraphTensor>>,
     ) {
         let input = &operands[0];
-        let size = input.shape()[self.dim];
+        let shape = input.shape();
 
-        // mask of the elements that reach the max (a >= max(value)); no element can exceed it
-        let max_val = input.max_dim(self.dim);
-        let max_b = max_val.unsqueeze(self.dim).expand(self.dim, size);
-        let mask = input.gte(&max_b);
+        // Broadcast the per-slice maximum back to the input shape.
+        let mut max_val = input.max_dims(&self.dims);
+        for &d in &self.dims {
+            max_val = max_val.unsqueeze(d).expand(d, shape[d]);
+        }
+
+        // mask of the elements that reach the max (a >= max(value)); no element
+        // can exceed it
+        let mask = input.gte(&max_val);
 
         // broadcast the upstream gradient back to the input shape
-        let grad_b = in_grad.unsqueeze(self.dim).expand(self.dim, size);
+        let mut grad_b = in_grad.copy_s();
+        for &d in &self.dims {
+            grad_b = grad_b.unsqueeze(d).expand(d, shape[d]);
+        }
 
         out.push(input.requires_grad().then(|| &grad_b * &mask));
-    }
-}
-
-#[derive(Debug)]
-pub struct SumDimOp {
-    pub dim: usize,
-    pub original_times: usize,
-}
-
-pub type BackwardSumDim = NBackwardOp<SumDimOp, 1>;
-
-impl GradRule<1> for SumDimOp {
-    fn compute_grad(
-        &self,
-        operands: &[GraphTensor; 1],
-        in_grad: &GraphTensor,
-        _retain_graph: bool,
-        out: &mut Vec<Option<GraphTensor>>,
-    ) {
-        out.push(operands[0].requires_grad().then(|| {
-            in_grad
-                .unsqueeze(self.dim)
-                .expand(self.dim, self.original_times)
-        }));
     }
 }
