@@ -135,7 +135,7 @@ mod tests {
 
     #[test]
     fn broadcast_forward() {
-        let a = GraphTensor::from_vec(vec![1.0, 2.0, 3.0], false);
+        let a = GraphTensor::wrap(vec![1.0, 2.0, 3.0], false);
         let b = a.broadcast_to_shape(&vec![2, 3]);
 
         assert_eq!(b.shape(), &vec![2, 3]);
@@ -146,7 +146,7 @@ mod tests {
 
     #[test]
     fn broadcast_sums_grad_over_expanded_axes() {
-        let a = GraphTensor::from_vec(vec![1.0, 2.0, 3.0], true);
+        let a = GraphTensor::wrap(vec![1.0, 2.0, 3.0], true);
         let b = a.broadcast_to_shape(&vec![2, 3]);
 
         let grads = b.backward(true);
@@ -161,7 +161,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn broadcast_incompatible_shape_panics() {
-        let a = GraphTensor::from_vec(vec![1.0, 2.0, 3.0], false);
+        let a = GraphTensor::wrap(vec![1.0, 2.0, 3.0], false);
         a.broadcast_to_shape(&vec![2, 2]);
     }
 }

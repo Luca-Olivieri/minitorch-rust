@@ -90,8 +90,8 @@ impl CovertypeDataset {
         let gt = buffer.pop().unwrap() - 1.0;
 
         (
-            GraphTensor::from_vec(buffer, false),
-            GraphTensor::from_vec(gt, false),
+            GraphTensor::wrap(buffer, false),
+            GraphTensor::wrap(gt, false),
         )
     }
 }

@@ -5,6 +5,9 @@ mod models;
 use core::GraphTensor;
 use std::time::Instant;
 
+// TODO implement
+// TODO use graphTensor.reshape() to build sum() over multiple dimensions
+
 use crate::{
     core::{
         nn::{
@@ -13,6 +16,7 @@ use crate::{
             loss::{CrossEntropyLoss, Loss},
             module::{Forward1, Module},
             optimizer::{Optimizer, SGD},
+            smoothing::SimpleExpSmoothing,
         },
         tensor::{AbstractTensor, FreeTensor},
     },
@@ -40,41 +44,53 @@ fn main() {
 }
 
 fn try_covertype() {
-    timeit!("Datasets set up (took {elapsed} s)";
+    timeit!("Datasets set up (took {elapsed})";
     let limit = 100;
     let train_ds = CovertypeDataset::new(String::from("/Users/lucaolivieri/Desktop/CS/coding/C++/minitorch/data/covertype_train.csv"), Some(limit));
     let val_ds = CovertypeDataset::new(String::from("/Users/lucaolivieri/Desktop/CS/coding/C++/minitorch/data/covertype_train.csv"), Some(limit));
     );
 
-    timeit!("Dataloaders set up (took {elapsed} s)";
+    timeit!("Dataloaders set up (took {elapsed})";
     let batch_size = 4;
-    let mut train_loader = DataLoader::new(train_ds, batch_size, true, 42);
-    let val_loader = DataLoader::new(val_ds, batch_size, false, 42);
+    let mut train_dl = DataLoader::new(train_ds, batch_size, true, 42);
+    let mut val_dl = DataLoader::new(val_ds, batch_size, false, 42);
     );
 
     let rng = StdRng::seed_from_u64(42);
 
-    timeit!("Model set up (took {elapsed} s)";
+    timeit!("Model set up (took {elapsed})";
     let mut model = CovertypeClassifier::new(rng);
     );
 
-    timeit!("Criterion and optimizer set up (took {elapsed} s)";
+    let base_lr = 1e-2;
+
+    timeit!("Criterion and optimizer set up (took {elapsed})";
     let criterion = CrossEntropyLoss::new();
-    let optimizer = SGD::new(0.01);
+    let optimizer = SGD::new(base_lr);
     );
 
-    let num_epochs = 2;
+    timeit!("Initial loss evaluation (took {elapsed})";
+    let init_loss = model.evaluate(&mut val_dl, &criterion);
+    println!("Initial loss value: {:?}", init_loss.item());
+    );
+
+    let num_epochs = 20;
+
+    let loss_smoothing_factor = 1e-1;
 
     for epoch in 0..num_epochs {
-        train_loader.reshuffle();
+        let epoch_viz = epoch + 1;
 
-        let mut epoch_loss = 0.0;
+        train_dl.reshuffle();
+
+        let mut epoch_loss = SimpleExpSmoothing::new(loss_smoothing_factor);
         let mut num_steps = 0;
 
-        timeit!("Training epoch completed (took {elapsed} s)";
-        for step in 0..train_loader.size() {
+        timeit!("Training epoch completed (took {elapsed})";
+        for step in 0..train_dl.size() {
+            let step_viz = step+1;
 
-            let (inputs, targets) = train_loader.get_batch(step);
+            let (inputs, targets) = train_dl.get_batch(step);
 
             let start = Instant::now();
             let logits = model.forward(&inputs);
@@ -98,19 +114,28 @@ fn try_covertype() {
 
             let step_time = start.elapsed();
 
-            epoch_loss += loss.item();
+            epoch_loss.update_and_get(loss.item());
             num_steps += 1;
 
             if (epoch+1) % 2 == 0 && (step+1) == 1000 {
-                println!("=== [EPOCH {epoch}] STEP {step} === ");
+                println!("=== [EPOCH {epoch_viz}/{num_epochs}] STEP {step_viz}/{num_steps} === "); // TODO implement correctly padded numbers
                 dbg!(forward_time, loss_time, backward_time, step_time, grads_map.len());
             }
         });
 
         if (epoch + 1) % 2 == 0 {
             println!(
-                "=== [EPOCH {epoch}] avg loss = {} over {num_steps} steps ===",
-                epoch_loss / num_steps as f64
+                "=== [EPOCH {epoch_viz}/{num_epochs}] avg. train loss = {} over {num_steps} steps ===",
+                epoch_loss.value()
+            );
+        }
+
+        let epoch_val_loss = model.evaluate(&mut val_dl, &criterion);
+
+        if (epoch + 1) % 2 == 0 {
+            println!(
+                "=== [EPOCH {epoch_viz}/{num_epochs}] val. loss = {:?} ===",
+                epoch_val_loss.item()
             );
         }
     }
@@ -187,12 +212,6 @@ fn try_xor() {
             );
         }
     }
-
-    // let logits = model.forward(&inputs);
-    // let gts_oh = targets.one_hot(logits.shape()[1]);
-
-    // println!("{}", &logits.argmax(1).get_node().storage);
-    // println!("{}", &gts_oh.argmax(1).get_node().storage);
 }
 
 fn test_complex_operation() {

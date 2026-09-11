@@ -2,13 +2,18 @@ use std::collections::HashMap;
 
 use rand::{SeedableRng, rngs::StdRng};
 
-use crate::core::{
-    GraphTensor,
-    nn::{
-        activate::ReLU,
-        compute::Linear,
-        module::{Forward1, Module},
+use crate::{
+    core::{
+        GraphTensor,
+        nn::{
+            activate::ReLU,
+            compute::Linear,
+            loss::Loss,
+            module::{Forward1, Module},
+        },
+        tensor::AbstractTensor,
     },
+    data::dataloader::DataLoader,
 };
 
 pub struct XORClassifier {
@@ -102,6 +107,29 @@ impl CovertypeClassifier {
             lin2,
             lin3,
         }
+    }
+
+    pub fn evaluate(&self, dl: &mut DataLoader, criterion: &dyn Loss) -> GraphTensor {
+        let mut curr_loss = 0.0;
+        let mut curr_sample_count = 0;
+
+        for step in 0..dl.size() {
+            let (mut inputs, mut gts) = dl.get_batch(step);
+            inputs.set_requires_grad(false);
+            gts.set_requires_grad(false);
+
+            let prs_oh = self.forward(&inputs);
+
+            let gts_oh = gts.one_hot(prs_oh.shape()[1]);
+
+            let loss = criterion.forward(&prs_oh, &gts_oh);
+
+            curr_loss += loss.item() * (inputs.shape()[0] as f64);
+            curr_sample_count += inputs.shape()[0];
+        }
+
+        let total_loss = curr_loss / (curr_sample_count as f64);
+        GraphTensor::wrap(total_loss, false)
     }
 }
 
