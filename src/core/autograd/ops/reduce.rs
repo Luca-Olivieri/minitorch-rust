@@ -6,14 +6,14 @@ use crate::core::tensor::{AbstractTensor, GraphTensor};
 // indices into the *input* (pre-reduction) tensor, sorted ascending and de-duplicated.
 
 #[derive(Debug)]
-pub struct SumDimsOp {
+pub struct SumOp {
     pub dims: Vec<usize>,
     pub keepdim: bool,
 }
 
-pub type BackwardSumDims = NBackwardOp<SumDimsOp, 1>;
+pub type BackwardSum = NBackwardOp<SumOp, 1>;
 
-impl GradRule<1> for SumDimsOp {
+impl GradRule<1> for SumOp {
     fn compute_grad(
         &self,
         operands: &[GraphTensor; 1],
@@ -41,14 +41,14 @@ impl GradRule<1> for SumDimsOp {
 }
 
 #[derive(Debug)]
-pub struct MaxDimsOp {
+pub struct MaxOp {
     pub dims: Vec<usize>,
     pub keepdim: bool,
 }
 
-pub type BackwardMaxDims = NBackwardOp<MaxDimsOp, 1>;
+pub type BackwardMax = NBackwardOp<MaxOp, 1>;
 
-impl GradRule<1> for MaxDimsOp {
+impl GradRule<1> for MaxOp {
     fn compute_grad(
         &self,
         operands: &[GraphTensor; 1],

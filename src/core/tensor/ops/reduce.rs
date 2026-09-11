@@ -4,7 +4,7 @@ use crate::core::GraphTensor;
 
 use crate::core::autograd::grad_fn::GradFnTrait;
 use crate::core::autograd::ops::math::{BackwardMatmul, MatmulOp};
-use crate::core::autograd::ops::reduce::{BackwardMaxDims, BackwardSumDims, MaxDimsOp, SumDimsOp};
+use crate::core::autograd::ops::reduce::{BackwardMax, BackwardSum, MaxOp, SumOp};
 use crate::core::node::TensorNode;
 use crate::core::storage::TensorStorage;
 use crate::core::storage::ops::reduce::resolve_dims;
@@ -33,9 +33,9 @@ impl GraphTensor {
                 }
             },
             Some(|operands: [GraphTensor; 1]| {
-                Box::new(BackwardSumDims {
+                Box::new(BackwardSum {
                     operands,
-                    op: SumDimsOp {
+                    op: SumOp {
                         dims: dims.clone(),
                         keepdim,
                     },
@@ -71,9 +71,9 @@ impl GraphTensor {
                 }
             },
             Some(|operands: [GraphTensor; 1]| {
-                Box::new(BackwardMaxDims {
+                Box::new(BackwardMax {
                     operands,
-                    op: MaxDimsOp {
+                    op: MaxOp {
                         dims: dims.clone(),
                         keepdim,
                     },

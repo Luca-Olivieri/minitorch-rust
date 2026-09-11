@@ -24,13 +24,17 @@ impl TensorStorage {
     pub fn max(a: &TensorStorage, dims: &[usize]) -> TensorStorage {
         let dims = resolve_dims(dims, &a.shape);
 
-        reduce_dims(
-            a,
-            &dims,
-            |v| v,
-            |acc, v| if v > acc { v } else { acc },
-            |acc| acc,
-        )
+        if dims.len() == a.shape.len() {
+            Self::max_all(a)
+        } else {
+            reduce_dims(
+                a,
+                &dims,
+                |v| v,
+                |acc, v| if v > acc { v } else { acc },
+                |acc| acc,
+            )
+        }
     }
 
     pub fn argmax(a: &TensorStorage, dim: usize) -> TensorStorage {
@@ -54,6 +58,27 @@ impl TensorStorage {
             // of per-element div/mod logical indexing (~3x faster in practice).
             let dims: Vec<usize> = (0..a.shape.len()).collect();
             reduce_dims(a, &dims, |v| v, |acc, v| acc + v, |acc| acc)
+        }
+    }
+
+    /// Max over every dimension in a single pass, yielding a scalar `[]`.
+    fn max_all(a: &TensorStorage) -> TensorStorage {
+        if a.contiguous {
+            // Flat slice fold: no stride bookkeeping, vectorizes the fcmp/select.
+            let total = a.buffer[a.offset..a.offset + a.numel]
+                .iter()
+                .fold(f64::NEG_INFINITY, |acc, v| if *v > acc { *v } else { acc });
+            TensorStorage::from_buffer(Vec::new(), vec![total])
+        } else {
+            // Strided view: same odometer walk as `sum_all`.
+            let dims: Vec<usize> = (0..a.shape.len()).collect();
+            reduce_dims(
+                a,
+                &dims,
+                |v| v,
+                |acc, v| if v > acc { v } else { acc },
+                |acc| acc,
+            )
         }
     }
 }
@@ -273,7 +298,91 @@ fn squeezed_shape(shape: &[usize], dims: &[usize]) -> Vec<usize> {
 
 #[cfg(test)]
 mod tests {
+    use std::hint::black_box;
+    use std::time::{Duration, Instant};
+
     use super::*;
+
+    // The `max` kernel before `max_all` existed: the generic reduce_dims odometer.
+    fn old_max_odometer(a: &TensorStorage) -> TensorStorage {
+        let dims: Vec<usize> = (0..a.shape.len()).collect();
+        reduce_dims(
+            a,
+            &dims,
+            |v| v,
+            |acc, v| if v > acc { v } else { acc },
+            |acc| acc,
+        )
+    }
+
+    // Time one variant over `iters` runs, returning ns/op.
+    fn time(f: impl Fn() -> TensorStorage, iters: usize) -> Duration {
+        let t = Instant::now();
+        for _ in 0..iters {
+            black_box(f());
+        }
+        t.elapsed() / iters as u32
+    }
+
+    fn bench_one(name: &str, a: &TensorStorage) {
+        const ITERS: usize = 100;
+
+        // correctness: both produce the same scalar max
+        let flat = TensorStorage::max_all(a).buffer.as_ref()[0];
+        let odometer = old_max_odometer(a).buffer.as_ref()[0];
+        assert_eq!(flat, odometer);
+
+        // warm up both code paths so the comparison is steady-state
+        for _ in 0..10 {
+            black_box(old_max_odometer(a));
+            black_box(TensorStorage::max_all(a));
+        }
+
+        let t_odo = time(|| old_max_odometer(a), ITERS).as_secs_f64() * 1e3;
+        let t_flat = time(|| TensorStorage::max_all(a), ITERS).as_secs_f64() * 1e3;
+        eprintln!(
+            "{name:28} odometer {:>9.3}ms   max_all {:>9.3}ms   ratio {:.2}x",
+            t_odo,
+            t_flat,
+            t_odo / t_flat
+        );
+    }
+
+    #[test]
+    fn max_all_matches_reduce_dims() {
+        let a = TensorStorage::from_buffer(vec![3, 4], (1..=12).map(|x| x as f64).collect());
+        assert_eq!(TensorStorage::max_all(&a).buffer.as_ref()[0], 12.0);
+        let t = TensorStorage::transpose(&a);
+        assert!(!t.contiguous);
+        assert_eq!(TensorStorage::max_all(&t).buffer.as_ref()[0], 12.0);
+    }
+
+    /// Run with: cargo test --release -- --ignored --nocapture bench_max_all
+    #[test]
+    #[ignore]
+    fn bench_max_all() {
+        const M: usize = 1 << 20; // 1 Mi elems = 8 MB of f64
+
+        // cache-resident 2D (goes through the general odometer, not the 1D tight loop)
+        let a = TensorStorage::from_buffer(vec![64, 16384], (0..M).map(|i| i as f64).collect());
+        bench_one("contig [64,16384] (8MB)", &a);
+
+        // cache-resident 3D
+        let a = TensorStorage::from_buffer(vec![64, 64, 256], (0..M).map(|i| i as f64).collect());
+        bench_one("contig [64,64,256] (8MB)", &a);
+
+        // larger than L2 (128MB)
+        let a = TensorStorage::from_buffer(
+            vec![1024, 1024, 16],
+            (0..M * 16).map(|i| i as f64).collect(),
+        );
+        bench_one("contig [1024,1024,16] (128MB)", &a);
+
+        // strided view of an 8MB buffer (transpose): both paths use the odometer
+        let c = TensorStorage::from_buffer(vec![1024, 1024], (0..M).map(|i| i as f64).collect());
+        let t = TensorStorage::transpose(&c);
+        bench_one("strided [1024,1024]^T (8MB)", &t);
+    }
 
     #[test]
     fn sum_strided_view_empty_dims_means_all() {
