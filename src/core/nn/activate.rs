@@ -39,11 +39,12 @@ impl Forward1 for LogSoftmax {
         // that would result from a separate `softmax(x).ln()` pipeline.
         let dim = input.shape().len() - 1; // softmax over the last dimension
 
-        let maxes = input.max_dim(dim);
-        let shifted = input - &maxes.unsqueeze(dim).expand(dim, input.shape()[dim]);
+        // keepdim: shapes stay broadcastable (…,1) so no manual unsqueeze/expand
+        let maxes = input.max(&[dim], true);
+        let shifted = input - &maxes;
 
-        let log_denom = shifted.exp().sum_dim(dim).ln();
-        &shifted - &log_denom.unsqueeze(dim).expand(dim, input.shape()[dim])
+        let log_denom = shifted.exp().sum(&[dim], true).ln();
+        &shifted - &log_denom
     }
 }
 
@@ -67,16 +68,15 @@ impl Forward1 for Softmax {
         let dim = ndim - 1; // softmax over the last dimension
 
         // subtract the max over the class dim for numerical stability
-        let maxes = input.max_dim(dim);
-        let shifted = input - &maxes.unsqueeze(dim).expand(dim, input.shape()[dim]);
+        let maxes = input.max(&[dim], true);
+        let shifted = input - &maxes;
 
         // compute exponentials of the shifted values
         let exps = shifted.exp();
 
-        // sum over the target dimension and broadcast for division
-        let sums = &exps.sum_dim(dim);
-        let denom = sums.unsqueeze(dim).expand(dim, input.shape()[dim]);
+        // sum over the target dimension (kept as size-1 for broadcasting)
+        let sums = exps.sum(&[dim], true);
 
-        &exps / &denom
+        &exps / &sums
     }
 }

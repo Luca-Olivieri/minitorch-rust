@@ -1,29 +1,32 @@
 use crate::core::storage::TensorStorage;
 
 impl TensorStorage {
-    /// Reduce over every dimension in a single pass, yielding a scalar `[]`.
-    pub fn sum_all(a: &TensorStorage) -> TensorStorage {
-        let total = if a.contiguous {
-            a.buffer[a.offset..a.offset + a.numel].iter().sum()
+    /// Sum over every dimension in `dims`, yielding a tensor with those
+    /// dimensions removed. An empty `dims` aggregates over all dimensions.
+    ///
+    /// Dispatch:
+    /// - all dims     -> flat/scaled `sum_all` pass (no intermediate allocations)
+    /// - a single dim -> tight strided loop (`reduce_single_dim`)
+    /// - otherwise    -> general stride-odometer pass (`reduce_dims`)
+    pub fn sum(a: &TensorStorage, dims: &[usize]) -> TensorStorage {
+        let dims = resolve_dims(dims, &a.shape);
+
+        if dims.len() == a.shape.len() {
+            Self::sum_all(a)
         } else {
-            (0..a.numel).map(|i| a[i]).sum()
-        };
-
-        TensorStorage::from_buffer(Vec::new(), vec![total])
+            reduce_dims(a, &dims, |v| v, |acc, v| acc + v, |acc| acc)
+        }
     }
 
-    /// Reduce over every dimension in `dims` at once, yielding a tensor with
-    /// those dimensions removed.
-    pub fn sum_dims(a: &TensorStorage, dims: &[usize]) -> TensorStorage {
-        reduce_dims(a, dims, |v| v, |acc, v| acc + v, |acc| acc)
-    }
+    /// Max over every dimension in `dims`, yielding the per-slice maximum over
+    /// their combined cartesian product. An empty `dims` aggregates over all
+    /// dimensions. A single reduced dim uses the tight strided loop.
+    pub fn max(a: &TensorStorage, dims: &[usize]) -> TensorStorage {
+        let dims = resolve_dims(dims, &a.shape);
 
-    /// Reduce over every dimension in `dims` at once, yielding the per-slice
-    /// maximum over their combined cartesian product.
-    pub fn max_dims(a: &TensorStorage, dims: &[usize]) -> TensorStorage {
         reduce_dims(
             a,
-            dims,
+            &dims,
             |v| v,
             |acc, v| if v > acc { v } else { acc },
             |acc| acc,
@@ -39,6 +42,20 @@ impl TensorStorage {
             |(_, i)| i as f64,
         )
     }
+
+    /// Reduce over every dimension in a single pass, yielding a scalar `[]`.
+    fn sum_all(a: &TensorStorage) -> TensorStorage {
+        if a.contiguous {
+            // Flat slice sum: auto-vectorizes cleanly and does not allocate.
+            let total = a.buffer[a.offset..a.offset + a.numel].iter().sum();
+            TensorStorage::from_buffer(Vec::new(), vec![total])
+        } else {
+            // Strided view: walk the reduced dims with the stride odometer instead
+            // of per-element div/mod logical indexing (~3x faster in practice).
+            let dims: Vec<usize> = (0..a.shape.len()).collect();
+            reduce_dims(a, &dims, |v| v, |acc, v| acc + v, |acc| acc)
+        }
+    }
 }
 
 /// Shared multi-dimension reduction.
@@ -49,8 +66,8 @@ impl TensorStorage {
 /// to the corresponding output slot. Each reduced dimension contributes its own stride,
 /// so the reduced dims do not need to be adjacent.
 ///
-/// `dims` must not contain duplicates and each must be in range; the slice can also be
-/// empty, in which case the input is copied through unchanged (like `torch.sum(x, ())`).
+/// `dims` must not contain duplicates and each must be in range. Callers
+/// [`resolve_dims`] first, so an empty `dims` means "all dims" there.
 fn reduce_dims<A, F, G>(
     a: &TensorStorage,
     dims: &[usize],
@@ -214,7 +231,8 @@ fn base_offsets(a: &TensorStorage, dims: &[usize]) -> Vec<usize> {
     bases
 }
 
-/// Sort, bounds-check and de-duplicate `dims`.
+/// Normalize `dims`: bounds-check, de-duplicate and sort. Unlike
+/// [`resolve_dims`], an empty list stays empty (the identity/no-op reduction).
 pub(crate) fn normalize_dims(dims: &[usize], shape: &[usize]) -> Vec<usize> {
     let mut out: Vec<usize> = Vec::with_capacity(dims.len());
     for &d in dims {
@@ -233,6 +251,16 @@ pub(crate) fn normalize_dims(dims: &[usize], shape: &[usize]) -> Vec<usize> {
     out
 }
 
+/// Normalize `dims` and treat an empty list as "all dimensions" (like PyTorch's
+/// `dim=None`), i.e. the full reduction.
+pub(crate) fn resolve_dims(dims: &[usize], shape: &[usize]) -> Vec<usize> {
+    let mut out = normalize_dims(dims, shape);
+    if out.is_empty() {
+        out.extend(0..shape.len());
+    }
+    out
+}
+
 /// The shape of the reduced tensor: the input shape with `dims` removed.
 fn squeezed_shape(shape: &[usize], dims: &[usize]) -> Vec<usize> {
     shape
@@ -241,4 +269,52 @@ fn squeezed_shape(shape: &[usize], dims: &[usize]) -> Vec<usize> {
         .filter(|(d, _)| !dims.contains(d))
         .map(|(_, &s)| s)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sum_strided_view_empty_dims_means_all() {
+        // 2x2 contiguous, then transposed into a [2,2] strided view.
+        let a = TensorStorage::from_buffer(vec![2, 2], (1..=4).map(|x| x as f64).collect());
+        let t = TensorStorage::transpose(&a);
+        assert!(!t.contiguous);
+
+        let sum = TensorStorage::sum(&t, &[]);
+        assert_eq!(sum.shape, Vec::<usize>::new());
+        assert_eq!(sum.buffer.as_ref()[0], 10.0);
+    }
+
+    #[test]
+    fn sum_empty_dims_matches_explicit_all_dims() {
+        let a = TensorStorage::from_buffer(vec![2, 2, 2], (1..=8).map(|x| x as f64).collect());
+
+        let via_empty = TensorStorage::sum(&a, &[]);
+        let via_all = TensorStorage::sum(&a, &[0, 1, 2]);
+        assert_eq!(via_empty.buffer.as_ref()[0], 36.0);
+        assert_eq!(via_empty.buffer.as_ref()[0], via_all.buffer.as_ref()[0]);
+        assert_eq!(via_empty.shape, Vec::<usize>::new());
+    }
+
+    #[test]
+    fn sum_single_dim_and_multi_dims_agree() {
+        let a = TensorStorage::from_buffer(vec![2, 3], (1..=6).map(|x| x as f64).collect());
+        // a = [[1,2,3],[4,5,6]]
+
+        let single = TensorStorage::sum(&a, &[0]); // [5,7,9]
+        assert_eq!(single.shape, vec![3]);
+        assert_eq!(single.buffer.as_ref(), &[5.0, 7.0, 9.0]);
+
+        // single-dim then all-dims equals reducing over {0,1} at once
+        let via_multi = TensorStorage::sum(&a, &[0, 1]);
+        let via_two_step = TensorStorage::sum(&single, &[0]);
+        assert_eq!(via_multi.buffer.as_ref(), via_two_step.buffer.as_ref());
+        assert_eq!(via_multi.buffer.as_ref(), &[21.0]);
+
+        // dim order does not matter (sorted internally)
+        let swapped = TensorStorage::sum(&a, &[1, 0]);
+        assert_eq!(swapped.buffer.as_ref(), &[21.0]);
+    }
 }

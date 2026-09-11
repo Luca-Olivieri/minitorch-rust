@@ -97,7 +97,9 @@ impl GradRule<1> for ExpandOp {
         out: &mut Vec<Option<GraphTensor>>,
     ) {
         out.push(operands[0].requires_grad().then(|| {
-            in_grad.sum_dim(self.dim).unsqueeze(self.dim) // TODO implement a flag to keep the dimension
+            // keepdim: summing an expanded (stride-0) axis yields a size-1 axis
+            // in the same position, which is exactly the operand's original shape
+            in_grad.sum(&[self.dim], true)
         }));
     }
 }

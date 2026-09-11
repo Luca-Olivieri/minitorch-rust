@@ -48,6 +48,44 @@ impl TensorStorage {
         }
     }
 
+    /// Re-insert a size-1 axis for every dimension in `dims` (in increasing
+    /// order), turning a squeezed reduction result back into a keepdim view.
+    /// Purely metadata: no data is copied.
+    pub fn unsqueeze_at(a: &TensorStorage, dims: &[usize]) -> TensorStorage {
+        if dims.windows(2).any(|w| w[0] >= w[1]) {
+            panic!(
+                "Dimensions {:?} must be strictly increasing for unsqueeze_at, otherwise the re-inserted axes end up in the wrong positions.",
+                dims
+            );
+        }
+
+        let mut out = Self::copy_s(a);
+        for &d in dims {
+            out = Self::unsqueeze(&out, d);
+        }
+        out
+    }
+
+    /// Remove the size-1 axis for every dimension in `dims` (given in increasing
+    /// order), the inverse of [`Self::unsqueeze_at`]. The highest dims are
+    /// removed first so the remaining indices stay valid. Purely metadata: no
+    /// data is copied.
+    pub fn squeeze_at(a: &TensorStorage, dims: &[usize]) -> TensorStorage {
+        if dims.windows(2).any(|w| w[0] >= w[1]) {
+            panic!(
+                "Dimensions {:?} must be strictly increasing for squeeze_at, otherwise the removed axes end up in the wrong positions.",
+                dims
+            );
+        }
+
+        // Remove highest dims first so the remaining indices stay valid.
+        let mut out = Self::copy_s(a);
+        for &d in dims.iter().rev() {
+            out = Self::squeeze(&out, d);
+        }
+        out
+    }
+
     pub fn squeeze(a: &TensorStorage, dim: usize) -> TensorStorage {
         if dim >= a.shape.len() {
             panic!(
@@ -247,4 +285,37 @@ pub(crate) fn squeeze_shape(shape: &Vec<usize>, dim: usize) -> Vec<usize> {
     let mut out_shape = shape.clone();
     out_shape.remove(dim);
     out_shape
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn squeeze_at_round_trips_unsqueeze_at() {
+        let a = TensorStorage::from_buffer(vec![2, 3], (1..=6).map(|x| x as f64).collect());
+
+        let kept = TensorStorage::unsqueeze_at(&a, &[0, 2]);
+        assert_eq!(kept.shape, vec![1, 2, 1, 3]);
+        assert_eq!(kept.buffer.as_ref(), &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+
+        let back = TensorStorage::squeeze_at(&kept, &[0, 2]);
+        assert_eq!(back.shape, vec![2, 3]);
+        assert_eq!(back.buffer.as_ref(), &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        assert_eq!(back.strides, a.strides);
+    }
+
+    #[test]
+    #[should_panic]
+    fn squeeze_at_panics_on_non_increasing_dims() {
+        let a = TensorStorage::from_buffer(vec![1, 2, 1], (1..=2).map(|x| x as f64).collect());
+        TensorStorage::squeeze_at(&a, &[2, 0]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn squeeze_at_panics_on_non_singleton_dim() {
+        let a = TensorStorage::from_buffer(vec![2, 3], (1..=6).map(|x| x as f64).collect());
+        TensorStorage::squeeze_at(&a, &[0]);
+    }
 }

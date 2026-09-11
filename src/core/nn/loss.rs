@@ -25,7 +25,7 @@ impl Loss for CrossEntropyLoss {
         if ndim == 0 {
             let logp = self.log_softmax.forward(logits);
             let loss = -&(targets * &logp);
-            return loss.mean_dim(0);
+            return loss.mean(&[], false);
         }
 
         let dim = ndim - 1; // cross-entropy over the last dimension;
@@ -37,9 +37,9 @@ impl Loss for CrossEntropyLoss {
         let mul = targets * &log_probs;
 
         // sum over class dimension and take negative
-        let summed = mul.sum_dim(dim);
+        let summed = mul.sum(&[dim], false);
         let loss = -&summed;
 
-        loss.mean_dim(0)
+        loss.mean(&[0], false)
     }
 }

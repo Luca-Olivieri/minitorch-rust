@@ -75,7 +75,7 @@ impl<Op: GradRule<N>, const N: usize> ComputesGrads for NBackwardOp<Op, N> {
 /// i.e. every axis where the operand's aligned dimension is 1 but the gradient's
 /// is larger.
 ///
-/// `sum_dim` removes the reduced axis, so the axis is re-inserted (keepdim) to
+/// `sum(dims)` removes the reduced axes, so the axis is re-inserted (keepdim) to
 /// keep positions stable while iterating, and any leading axes that only existed
 /// because the target shape was rank-deficient are squeezed away at the end.
 /// When `in_grad` already has `target_shape`, this is a no-op.
@@ -106,7 +106,7 @@ pub fn reduce_grad_to_shape(
     let mut g = in_grad.copy_s();
     for d in (0..bs.len()).rev() {
         if aligned[d] == 1 && bs[d] > 1 {
-            g = g.sum_dim(d).unsqueeze(d);
+            g = g.sum(&[d], true);
         }
     }
 

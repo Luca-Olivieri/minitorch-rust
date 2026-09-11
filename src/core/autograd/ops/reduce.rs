@@ -8,6 +8,7 @@ use crate::core::tensor::{AbstractTensor, GraphTensor};
 #[derive(Debug)]
 pub struct SumDimsOp {
     pub dims: Vec<usize>,
+    pub keepdim: bool,
 }
 
 pub type BackwardSumDims = NBackwardOp<SumDimsOp, 1>;
@@ -22,11 +23,17 @@ impl GradRule<1> for SumDimsOp {
     ) {
         out.push(operands[0].requires_grad().then(|| {
             // Gradient of a sum is the upstream gradient replicated over every
-            // reduced dimension (via stride-0 expand views).
+            // reduced dimension (via stride-0 expand views). With keepdim the
+            // reduced axes are already present (size 1) in `in_grad`, so only
+            // expanding is needed; otherwise they are re-inserted first.
             let mut g = in_grad.copy_s();
             let shape = operands[0].shape();
             for &d in &self.dims {
-                g = g.unsqueeze(d).expand(d, shape[d]);
+                if self.keepdim {
+                    g = g.expand(d, shape[d]);
+                } else {
+                    g = g.unsqueeze(d).expand(d, shape[d]);
+                }
             }
             g
         }));
@@ -36,6 +43,7 @@ impl GradRule<1> for SumDimsOp {
 #[derive(Debug)]
 pub struct MaxDimsOp {
     pub dims: Vec<usize>,
+    pub keepdim: bool,
 }
 
 pub type BackwardMaxDims = NBackwardOp<MaxDimsOp, 1>;
@@ -52,7 +60,7 @@ impl GradRule<1> for MaxDimsOp {
         let shape = input.shape();
 
         // Broadcast the per-slice maximum back to the input shape.
-        let mut max_val = input.max_dims(&self.dims);
+        let mut max_val = input.max(&self.dims, false);
         for &d in &self.dims {
             max_val = max_val.unsqueeze(d).expand(d, shape[d]);
         }
@@ -61,10 +69,15 @@ impl GradRule<1> for MaxDimsOp {
         // can exceed it
         let mask = input.gte(&max_val);
 
-        // broadcast the upstream gradient back to the input shape
+        // broadcast the upstream gradient back to the input shape; with keepdim
+        // the reduced axes are already present (size 1) in `in_grad`
         let mut grad_b = in_grad.copy_s();
         for &d in &self.dims {
-            grad_b = grad_b.unsqueeze(d).expand(d, shape[d]);
+            if self.keepdim {
+                grad_b = grad_b.expand(d, shape[d]);
+            } else {
+                grad_b = grad_b.unsqueeze(d).expand(d, shape[d]);
+            }
         }
 
         out.push(input.requires_grad().then(|| &grad_b * &mask));

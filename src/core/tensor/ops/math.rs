@@ -19,7 +19,7 @@ impl GraphTensor {
     impl_tensor_binary_op!(maximum, TensorStorage::maximum, BackwardMaximum, MaximumOp);
 
     pub fn norm(&self) -> f64 {
-        (self * self).sum().item().sqrt()
+        (self * self).sum(&[], false).item().sqrt()
     }
     pub fn dist(a: &GraphTensor, b: &GraphTensor) -> f64 {
         (a - b).norm()
