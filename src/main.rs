@@ -77,13 +77,13 @@ fn try_covertype() {
     let num_epochs = 20;
 
     let loss_smoothing_factor = 1e-1;
+    let mut epoch_loss_smoother = SimpleExpSmoothing::new(loss_smoothing_factor);
 
     for epoch in 0..num_epochs {
         let epoch_viz = epoch + 1;
 
         train_dl.reshuffle();
 
-        let mut epoch_loss = SimpleExpSmoothing::new(loss_smoothing_factor);
         let mut num_steps = 0;
 
         timeit!("Training epoch completed (took {elapsed})";
@@ -114,7 +114,7 @@ fn try_covertype() {
 
             let step_time = start.elapsed();
 
-            epoch_loss.update_and_get(loss.item());
+            epoch_loss_smoother.update(loss.item());
             num_steps += 1;
 
             if (epoch+1) % 2 == 0 && (step+1) == 1000 {
@@ -126,7 +126,7 @@ fn try_covertype() {
         if (epoch + 1) % 2 == 0 {
             println!(
                 "=== [EPOCH {epoch_viz}/{num_epochs}] avg. train loss = {} over {num_steps} steps ===",
-                epoch_loss.value()
+                epoch_loss_smoother.value()
             );
         }
 
@@ -138,6 +138,8 @@ fn try_covertype() {
                 epoch_val_loss.item()
             );
         }
+
+        epoch_loss_smoother.reset();
     }
 }
 
