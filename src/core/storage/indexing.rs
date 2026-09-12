@@ -25,8 +25,15 @@ impl TensorStorage {
             return false;
         };
 
-        for i in 0..self.numel {
-            buf[self.offset + i] += other[i];
+        if other.contiguous {
+            for i in 0..self.numel {
+                buf[self.offset + i] += other.buffer[other.offset + i];
+            }
+        } else {
+            // strided source: odometer over its flat indices.
+            for (i, f) in other.strided_indices().enumerate() {
+                buf[self.offset + i] += other.buffer[f];
+            }
         }
 
         true
@@ -67,7 +74,6 @@ impl TensorStorage {
         if self.contiguous {
             l_idx + self.offset
         } else {
-            // TODO implement strided iterator to avoid this costly mod and div operations
             let mut offset = self.offset;
             let mut curr_idx = l_idx;
             for i in (0..self.shape.len()).rev() {

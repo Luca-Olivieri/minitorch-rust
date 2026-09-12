@@ -1,6 +1,7 @@
 pub mod format;
 pub mod indexing;
 pub mod init;
+pub mod iter;
 pub mod ops;
 
 use std::rc::Rc;

@@ -117,8 +117,10 @@ impl GraphTensor {
 
         // The output is contiguous with the input coords followed by the class dim,
         // so the flat output index of (input logical index i, class cls) is i*num_classes + cls.
+        let in_buffer = &self.node.storage.buffer;
+        let mut flat_iter = self.node.storage.strided_indices();
         for i in 0..in_numel {
-            let raw_value = self.node.storage[i];
+            let raw_value = in_buffer[flat_iter.next().unwrap()];
             if raw_value.fract() != 0.0 {
                 panic!("One-hotted tensor has value {raw_value} with fractional part at index {i}.")
             }

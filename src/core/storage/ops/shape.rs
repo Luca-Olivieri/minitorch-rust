@@ -199,8 +199,10 @@ impl TensorStorage {
 
         let mut out_buf = Vec::with_capacity(elem_numel * n);
         for s in storages {
-            for i in 0..elem_numel {
-                out_buf.push(s[i]);
+            if s.contiguous {
+                out_buf.extend_from_slice(&s.buffer[s.offset..s.offset + elem_numel]);
+            } else {
+                out_buf.extend(s.strided_indices().map(|f| s.buffer[f]));
             }
         }
 
