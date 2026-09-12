@@ -1,4 +1,4 @@
-use minitorch_rust::core::storage::TensorStorage;
+use crate::core::storage::TensorStorage;
 
 #[test]
 fn squeeze_at_round_trips_unsqueeze_at() {

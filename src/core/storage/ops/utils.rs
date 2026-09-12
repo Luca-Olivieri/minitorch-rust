@@ -1,5 +1,5 @@
-use crate::core::storage::iter::StridedIter;
 use crate::core::storage::TensorStorage;
+use crate::core::storage::iter::StridedIter;
 
 pub fn apply_op<F, const N: usize>(operands: &[&TensorStorage; N], op: F) -> TensorStorage
 where
@@ -34,13 +34,17 @@ where
         let outer_shape = &first.shape[..outer_ndim];
 
         let mut iters: [StridedIter; N] = std::array::from_fn(|j| {
-            StridedIter::new(outer_shape, &operands[j].strides[..outer_ndim], operands[j].offset, outer_numel)
+            StridedIter::new(
+                outer_shape,
+                &operands[j].strides[..outer_ndim],
+                operands[j].offset,
+                outer_numel,
+            )
         });
         for _ in 0..outer_numel {
             let bases: [usize; N] = std::array::from_fn(|j| iters[j].next().unwrap());
             for i in 0..run {
-                let vals: [f64; N] =
-                    std::array::from_fn(|j| operands[j].buffer[bases[j] + i]);
+                let vals: [f64; N] = std::array::from_fn(|j| operands[j].buffer[bases[j] + i]);
                 out_buf.push(op(vals));
             }
         }
@@ -49,8 +53,9 @@ where
         // strided operands walk an odometer (O(1) amortized per element,
         // instead of per-element div/mod logical indexing).
         let offsets: [usize; N] = std::array::from_fn(|j| operands[j].offset);
-        let mut iters: [Option<StridedIter>; N] =
-            std::array::from_fn(|j| (!operands[j].contiguous).then(|| operands[j].strided_indices()));
+        let mut iters: [Option<StridedIter>; N] = std::array::from_fn(|j| {
+            (!operands[j].contiguous).then(|| operands[j].strided_indices())
+        });
         for i in 0..first.numel {
             let vals: [f64; N] = std::array::from_fn(|j| match &mut iters[j] {
                 Some(it) => operands[j].buffer[it.next().unwrap()],

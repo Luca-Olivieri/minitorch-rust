@@ -46,7 +46,7 @@ impl_tensor_unary_ops! {
     Neg, neg, TensorStorage::neg, BackwardNeg, NegOp;
 }
 
-pub fn apply_tensor_op<F, G, const N: usize>(
+pub(crate) fn apply_tensor_op<F, G, const N: usize>(
     op: F,
     grad_fn: Option<G>,
     operands: &[&GraphTensor; N],
@@ -57,7 +57,7 @@ where
 {
     // NumPy-style right-aligned broadcasting: every operand is expanded to a
     // common shape (via stride-0 views) before the storage op runs.
-    let target_shape = broadcast_shape(&(*operands).map(|o| &o.node.storage.shape));
+    let target_shape = broadcast_shape(&(*operands).map(|o| o.node.storage.shape.as_slice()));
 
     let needs_broadcast = operands
         .iter()
@@ -97,7 +97,7 @@ where
 // Compute the result shape of broadcasting all the given shapes together,
 // following NumPy's right-aligned semantics (dimensions of size 1 stretch to
 // the other operand's size; a missing leading dim acts as 1).
-fn broadcast_shape(shapes: &[&Vec<usize>]) -> Vec<usize> {
+fn broadcast_shape(shapes: &[&[usize]]) -> Vec<usize> {
     let ndim = shapes.iter().map(|s| s.len()).max().unwrap();
     let mut out = vec![1usize; ndim];
 

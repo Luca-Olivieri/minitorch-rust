@@ -7,31 +7,29 @@ use std::rc::Rc;
 use crate::core::node::TensorNode;
 use crate::core::storage::TensorStorage;
 
+/// Accessors shared by every tensor flavor (`GraphTensor`, `FreeTensor`).
+///
+/// This is the only dialect of tensor access that is exposed to library users:
+/// the underlying graph node (`TensorNode`) and storage (`TensorStorage`) are
+/// implementation details and are deliberately NOT surfaced here.
 pub trait AbstractTensor {
+    fn at(&self, md_idx: &[usize]) -> &f64;
+
+    fn shape(&self) -> &Vec<usize>;
+
+    fn numel(&self) -> usize;
+
+    fn requires_grad(&self) -> bool;
+
+    fn set_requires_grad(&mut self, requires_grad: bool);
+}
+
+/// Crate-internal access to the computation-graph node. Not public: `TensorNode`
+/// and `TensorStorage` are implementation details.
+pub(crate) trait TensorNodeAccess: AbstractTensor {
     fn get_node(&self) -> &TensorNode;
 
     fn get_node_mut(&mut self) -> &mut TensorNode;
-
-    fn at(&self, md_idx: &Vec<usize>) -> &f64 {
-        &self.get_node().storage[md_idx]
-    }
-
-    fn shape(&self) -> &Vec<usize> {
-        &self.get_node().storage.shape
-    }
-
-    fn numel(&self) -> usize {
-        self.get_node().storage.numel
-    }
-
-    fn requires_grad(&self) -> bool {
-        self.get_node().requires_grad
-    }
-
-    fn set_requires_grad(&mut self, requires_grad: bool) {
-        let node = self.get_node_mut();
-        node.requires_grad = requires_grad;
-    }
 }
 
 #[derive(Debug)]
@@ -41,6 +39,28 @@ pub struct FreeTensor {
 }
 
 impl AbstractTensor for FreeTensor {
+    fn at(&self, md_idx: &[usize]) -> &f64 {
+        &self.node.storage[md_idx]
+    }
+
+    fn shape(&self) -> &Vec<usize> {
+        &self.node.storage.shape
+    }
+
+    fn numel(&self) -> usize {
+        self.node.storage.numel
+    }
+
+    fn requires_grad(&self) -> bool {
+        self.node.requires_grad
+    }
+
+    fn set_requires_grad(&mut self, requires_grad: bool) {
+        self.node.requires_grad = requires_grad;
+    }
+}
+
+impl TensorNodeAccess for FreeTensor {
     fn get_node(&self) -> &TensorNode {
         self.node.as_ref()
     }
@@ -163,6 +183,28 @@ impl<T: IntoNestedStorage> IntoNestedStorage for Vec<T> {
 }
 
 impl AbstractTensor for GraphTensor {
+    fn at(&self, md_idx: &[usize]) -> &f64 {
+        &self.node.storage[md_idx]
+    }
+
+    fn shape(&self) -> &Vec<usize> {
+        &self.node.storage.shape
+    }
+
+    fn numel(&self) -> usize {
+        self.node.storage.numel
+    }
+
+    fn requires_grad(&self) -> bool {
+        self.node.requires_grad
+    }
+
+    fn set_requires_grad(&mut self, requires_grad: bool) {
+        self.get_node_mut().requires_grad = requires_grad;
+    }
+}
+
+impl TensorNodeAccess for GraphTensor {
     fn get_node(&self) -> &TensorNode {
         self.node.as_ref()
     }

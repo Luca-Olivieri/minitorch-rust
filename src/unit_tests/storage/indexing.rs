@@ -1,7 +1,7 @@
 use std::hint::black_box;
 use std::time::{Duration, Instant};
 
-use minitorch_rust::core::storage::TensorStorage;
+use crate::core::storage::TensorStorage;
 
 // The `apply_op` strided path before `StridedIter` existed: per-element
 // `operands[j][i]`, i.e. a `logic_to_flat` div/mod decomposition on every
@@ -79,7 +79,10 @@ fn mul_matches_old_path_on_strided_views() {
 #[test]
 fn mul_matches_old_path_on_broadcast_views() {
     // bias [1,256] broadcast to [4096,256]: strides [0,1], inner run 256
-    let x = TensorStorage::from_buffer(vec![4096, 256], (1..=4096 * 256).map(|x| x as f64).collect());
+    let x = TensorStorage::from_buffer(
+        vec![4096, 256],
+        (1..=4096 * 256).map(|x| x as f64).collect(),
+    );
     let bias = TensorStorage::from_buffer(vec![1, 256], (1..=256).map(|x| x as f64).collect());
     let bb = bias.broadcast_to_shape(&vec![4096, 256]);
     assert!(!bb.contiguous);
@@ -135,10 +138,7 @@ fn bench_strided_mul() {
     bench_one("contig x bias-bcast (8MB)", &d, &bias_b);
 
     // 3D bias-broadcast: [1,1,256] -> [64,64,256], strides [0,0,1] (inner run 256)
-    let x3 = TensorStorage::from_buffer(
-        vec![64, 64, 256],
-        (0..M).map(|i| i as f64).collect(),
-    );
+    let x3 = TensorStorage::from_buffer(vec![64, 64, 256], (0..M).map(|i| i as f64).collect());
     let bias3 = TensorStorage::from_buffer(vec![1, 1, 256], (0..256).map(|i| i as f64).collect());
     let bias3_b = bias3.broadcast_to_shape(&vec![64, 64, 256]);
     bench_one("contig x 3D-bcast (8MB)", &x3, &bias3_b);

@@ -52,6 +52,8 @@ impl GraphTensor {
         )
     }
 
+    // TODO make transpose over tensors of arbitrary shape, and select the two dims to swap
+
     pub fn transpose(&self) -> GraphTensor {
         if self.shape().len() != 2 {
             panic!(
@@ -89,7 +91,7 @@ impl GraphTensor {
         Self::broadcast_to_shape(self, b.shape())
     }
 
-    pub fn broadcast_to_shape(&self, target_shape: &Vec<usize>) -> GraphTensor {
+    pub fn broadcast_to_shape(&self, target_shape: &[usize]) -> GraphTensor {
         apply_tensor_op(
             |ops: &[&TensorStorage; 1]| TensorStorage::broadcast_to_shape(ops[0], target_shape),
             Some(|operands: [GraphTensor; 1]| {

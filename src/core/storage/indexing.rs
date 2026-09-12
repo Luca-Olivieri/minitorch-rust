@@ -88,10 +88,10 @@ impl TensorStorage {
     }
 }
 
-impl Index<&Vec<usize>> for TensorStorage {
+impl Index<&[usize]> for TensorStorage {
     type Output = f64;
 
-    fn index(&self, md_idx: &Vec<usize>) -> &f64 {
+    fn index(&self, md_idx: &[usize]) -> &f64 {
         &self.buffer[self.md_to_flat(md_idx)]
     }
 }
@@ -108,8 +108,8 @@ impl Index<usize> for TensorStorage {
 
 // TODO alternatively, the two IdexMut methods down here can be removed, and when they are used,
 // modify the flat_data directly BEFORE giving it to the TensorStorage
-impl IndexMut<&Vec<usize>> for TensorStorage {
-    fn index_mut(&mut self, md_idx: &Vec<usize>) -> &mut f64 {
+impl IndexMut<&[usize]> for TensorStorage {
+    fn index_mut(&mut self, md_idx: &[usize]) -> &mut f64 {
         let f_idx = self.md_to_flat(md_idx);
         &mut self.buffer_mut()[f_idx]
     }

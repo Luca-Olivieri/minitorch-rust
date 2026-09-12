@@ -1,8 +1,10 @@
+BIN ?= xor
+
 run:
-	@cargo run
+	@cargo run --bin $(BIN)
 
 run-release:
-	@cargo run --release
+	@cargo run --release --bin $(BIN)
 
 release:
 	@cargo build --release

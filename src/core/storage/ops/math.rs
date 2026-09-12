@@ -1,5 +1,8 @@
 use crate::core::storage::TensorStorage;
 
+// Not every storage-level op is reachable from the user-facing tensor layer yet,
+// so unused ones are explicitly allowed here.
+#[allow(dead_code)]
 impl TensorStorage {
     impl_storage_elemwise_ops! {
         add,     (a, b), a + b;

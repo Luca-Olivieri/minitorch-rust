@@ -1,7 +1,7 @@
 use minitorch_rust::core::GraphTensor;
 use minitorch_rust::core::nn::activate::Softmax;
 use minitorch_rust::core::nn::loss::{CrossEntropyLoss, Loss};
-use minitorch_rust::core::nn::module::{Forward1, Module};
+use minitorch_rust::core::nn::module::Forward1;
 use minitorch_rust::core::nn::optimizer::{Optimizer, SGD};
 use minitorch_rust::core::tensor::{AbstractTensor, FreeTensor};
 use minitorch_rust::models::XORClassifier;
@@ -11,23 +11,23 @@ use rand::rngs::StdRng;
 
 fn xor_inputs() -> GraphTensor {
     let mut inputs_f = FreeTensor::new(vec![4, 2], 0.0, false);
-    inputs_f.set(&vec![0, 0], 0.0);
-    inputs_f.set(&vec![0, 1], 0.0);
-    inputs_f.set(&vec![1, 0], 0.0);
-    inputs_f.set(&vec![1, 1], 1.0);
-    inputs_f.set(&vec![2, 0], 1.0);
-    inputs_f.set(&vec![2, 1], 0.0);
-    inputs_f.set(&vec![3, 0], 1.0);
-    inputs_f.set(&vec![3, 1], 1.0);
+    inputs_f.set(&[0, 0], 0.0);
+    inputs_f.set(&[0, 1], 0.0);
+    inputs_f.set(&[1, 0], 0.0);
+    inputs_f.set(&[1, 1], 1.0);
+    inputs_f.set(&[2, 0], 1.0);
+    inputs_f.set(&[2, 1], 0.0);
+    inputs_f.set(&[3, 0], 1.0);
+    inputs_f.set(&[3, 1], 1.0);
     inputs_f.to_graph()
 }
 
 fn xor_targets() -> GraphTensor {
     let mut targets_f = FreeTensor::new(vec![4], 0.0, true);
-    targets_f.set(&vec![0], 0.0);
-    targets_f.set(&vec![1], 1.0);
-    targets_f.set(&vec![2], 1.0);
-    targets_f.set(&vec![3], 0.0);
+    targets_f.set(&[0], 0.0);
+    targets_f.set(&[1], 1.0);
+    targets_f.set(&[2], 1.0);
+    targets_f.set(&[3], 0.0);
     targets_f.to_graph()
 }
 
@@ -48,7 +48,7 @@ fn xor_training_reduces_loss_and_tracks_recorded_trajectory() {
 
     // Forward the untrained model: records the seeded initialisation state.
     let init_logits = model.forward(&inputs);
-    assert_eq!(init_logits.shape(), &vec![4, 2]);
+    assert_eq!(init_logits.shape(), &[4, 2]);
     let expected_init = vec![
         vec![0.0, 0.0],
         vec![0.06010813653256624, 0.17175688032447833],
@@ -57,7 +57,7 @@ fn xor_training_reduces_loss_and_tracks_recorded_trajectory() {
     ];
     for i in 0..4 {
         for j in 0..2 {
-            let v = *init_logits.at(&vec![i, j]);
+            let v = *init_logits.at(&[i, j]);
             assert!(
                 (v - expected_init[i][j]).abs() < 1e-9,
                 "init logits[{i}][{j}] = {v}, expected {}",

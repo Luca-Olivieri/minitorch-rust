@@ -70,6 +70,7 @@ impl TensorStorage {
     /// order), the inverse of [`Self::unsqueeze_at`]. The highest dims are
     /// removed first so the remaining indices stay valid. Purely metadata: no
     /// data is copied.
+    #[allow(dead_code)]
     pub fn squeeze_at(a: &TensorStorage, dims: &[usize]) -> TensorStorage {
         if dims.windows(2).any(|w| w[0] >= w[1]) {
             panic!(
@@ -209,11 +210,12 @@ impl TensorStorage {
         TensorStorage::from_buffer(out_shape, out_buf)
     }
 
+    #[allow(dead_code)]
     pub fn broadcast(&self, b: &TensorStorage) -> TensorStorage {
         Self::broadcast_to_shape(self, &b.shape)
     }
 
-    pub fn broadcast_to_shape(&self, shape: &Vec<usize>) -> TensorStorage {
+    pub fn broadcast_to_shape(&self, shape: &[usize]) -> TensorStorage {
         if !self.is_broadcastable(shape) {
             panic!(
                 "Shape {:?} cannot be broadcasted to {:?}",
@@ -254,7 +256,7 @@ impl TensorStorage {
         }
     }
 
-    fn is_broadcastable(&self, shape: &Vec<usize>) -> bool {
+    fn is_broadcastable(&self, shape: &[usize]) -> bool {
         let ndim_diff = self.shape.len() as isize - shape.len() as isize;
 
         // source has more dims than target: extra source dims must be 1

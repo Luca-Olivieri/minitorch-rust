@@ -7,7 +7,8 @@ fn assert_shape(t: &GraphTensor, expected: &[usize]) {
 
 /// Assert the tensor's element values (in logical flat order) against `expected`,
 /// within a small absolute tolerance. Grad/sum tensors may be strided broadcast
-/// views, so values are read through the storage's logical index.
+/// views, so values are read through the public `at` API, walking the shape in
+/// row-major (flat) order.
 fn assert_values(t: &GraphTensor, expected: &[f64]) {
     assert_eq!(
         t.numel(),
@@ -15,9 +16,8 @@ fn assert_values(t: &GraphTensor, expected: &[f64]) {
         "numel mismatch for shape {:?}",
         t.shape()
     );
-    let storage = &t.get_node().storage;
     for (i, e) in expected.iter().enumerate() {
-        let a = storage[i];
+        let a = *t.at(&flat_to_md(i, t.shape()));
         let tol = 1e-9;
         assert!(
             (a - e).abs() <= tol,
@@ -25,6 +25,16 @@ fn assert_values(t: &GraphTensor, expected: &[f64]) {
             t.shape()
         );
     }
+}
+
+/// Convert a flat row-major index into the multi-dimensional index of `shape`.
+fn flat_to_md(mut i: usize, shape: &[usize]) -> Vec<usize> {
+    let mut md = vec![0usize; shape.len()];
+    for d in (0..shape.len()).rev() {
+        md[d] = i % shape[d];
+        i /= shape[d];
+    }
+    md
 }
 
 #[test]

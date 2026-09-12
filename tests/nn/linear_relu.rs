@@ -22,14 +22,14 @@ fn linear_relu_forward_and_backward() {
     let grads_map = b.backward(true);
 
     // Relu clamps the two negative logits of the seeded Linear layer to 0.
-    assert_eq!(b.shape(), &vec![2, 4]);
+    assert_eq!(b.shape(), &[2, 4]);
     let expected_b = vec![
         vec![0.0, 0.0, 1.4924861769132234, 0.48383863009522066],
         vec![0.0, 0.0, 1.4924861769132234, 0.48383863009522066],
     ];
     for i in 0..2 {
         for j in 0..4 {
-            let v = *b.at(&vec![i, j]);
+            let v = *b.at(&[i, j]);
             assert!(
                 (v - expected_b[i][j]).abs() < 1e-9,
                 "b[{i}][{j}] = {v}, expected {}",
@@ -40,14 +40,14 @@ fn linear_relu_forward_and_backward() {
 
     // dx = W^T @ drelu, where the relu mask zeroes the dead units.
     let dx = grads_map.get(&x.to_key()).unwrap();
-    assert_eq!(dx.shape(), &vec![2, 3]);
+    assert_eq!(dx.shape(), &[2, 3]);
     let expected_dx = vec![
         vec![0.07844817624333589, 1.086312925282642, 0.8115637054824661],
         vec![0.07844817624333589, 1.086312925282642, 0.8115637054824661],
     ];
     for i in 0..2 {
         for j in 0..3 {
-            let v = *dx.at(&vec![i, j]);
+            let v = *dx.at(&[i, j]);
             assert!(
                 (v - expected_dx[i][j]).abs() < 1e-9,
                 "dx[{i}][{j}] = {v}, expected {}",

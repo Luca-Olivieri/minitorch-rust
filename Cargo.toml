@@ -3,6 +3,18 @@ name = "minitorch-rust"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "minitorch_rust"
+path = "src/lib.rs"
+
+[[bin]]
+name = "xor"
+path = "main/xor.rs"
+
+[[bin]]
+name = "covertype"
+path = "main/covertype.rs"
+
 [dependencies]
 fmt = "0.1.0"
 rand = "0.10.2"
