@@ -95,7 +95,7 @@ macro_rules! module {
             params { $($param_field:ident),* $(,)? }
         }
     ) => {
-        modules! {
+        module! {
             $model {
                 modules { $($mod_field: $mod_ty),* },
                 params { $($param_field),* },
@@ -125,7 +125,7 @@ macro_rules! module {
             optional_params { $($opt_field:ident),* $(,)? }
         }
     ) => {
-        modules! {
+        module! {
             $model {
                 modules {},
                 params { $($param_field),* },
@@ -139,7 +139,7 @@ macro_rules! module {
             modules { $($mod_field:ident : $mod_ty:ty),* $(,)? }
         }
     ) => {
-        modules! {
+        module! {
             $model {
                 modules { $($mod_field: $mod_ty),* },
                 params {},
