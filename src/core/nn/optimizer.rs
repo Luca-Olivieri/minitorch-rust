@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::core::{GraphTensor, autograd::TensorKey};
+use crate::core::{autograd::TensorKey, GraphTensor};
 
 pub trait Optimizer {
     fn step(

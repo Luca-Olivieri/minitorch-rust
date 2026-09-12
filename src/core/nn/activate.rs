@@ -1,7 +1,7 @@
 use crate::core::{
-    GraphTensor,
     nn::module::{Forward1, Module},
     tensor::AbstractTensor,
+    GraphTensor,
 };
 
 pub struct ReLU {}

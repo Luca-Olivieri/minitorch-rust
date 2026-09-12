@@ -5,8 +5,8 @@ use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
-use crate::core::GraphTensor;
 use crate::core::node::TensorNode;
+use crate::core::GraphTensor;
 
 pub struct TensorKey {
     node: Rc<TensorNode>, // TODO or use GraphTensor directly

@@ -3,7 +3,7 @@ use crate::core::storage::TensorStorage;
 
 #[derive(Debug)]
 pub struct TensorNode {
-    pub(crate) storage: TensorStorage,
+    pub storage: TensorStorage,
     pub(crate) requires_grad: bool,
     pub(super) grad_fn: Option<Box<dyn GradFnTrait>>,
 }

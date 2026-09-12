@@ -122,7 +122,11 @@ fn grad_a(a: &GraphTensor, b: &GraphTensor, in_grad: &GraphTensor) -> GraphTenso
         &b2.transpose(),
     );
 
-    if a_was_1d { g.squeeze(0) } else { g }
+    if a_was_1d {
+        g.squeeze(0)
+    } else {
+        g
+    }
 }
 
 // dL/dB = A^T @ in_grad
@@ -135,7 +139,11 @@ fn grad_b(a: &GraphTensor, b: &GraphTensor, in_grad: &GraphTensor) -> GraphTenso
         &grad_to_2d(a.shape().len(), b.shape().len(), in_grad),
     );
 
-    if b_was_1d { g.squeeze(1) } else { g }
+    if b_was_1d {
+        g.squeeze(1)
+    } else {
+        g
+    }
 }
 
 #[derive(Debug)]
@@ -289,9 +297,10 @@ impl GradRule<2> for MaximumOp {
             a.requires_grad()
                 .then(|| reduce_grad_to_shape(&(in_grad * &a.gte(b)), a.shape(), retain_graph)),
         );
-        out.push(b.requires_grad().then(|| {
-            reduce_grad_to_shape(&(in_grad * &a.lt(b)), b.shape(), retain_graph) // TODO implement a NOT operator
-        }));
+        out.push(
+            b.requires_grad()
+                .then(|| reduce_grad_to_shape(&(in_grad * &a.lt(b)), b.shape(), retain_graph)),
+        );
     }
 }
 

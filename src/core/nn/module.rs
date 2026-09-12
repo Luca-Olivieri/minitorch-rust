@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::core::{GraphTensor, tensor::AbstractTensor};
+use crate::core::{tensor::AbstractTensor, GraphTensor};
 
 // TODO should Module have both parameters AND modules (not just one of those at a time)?
 

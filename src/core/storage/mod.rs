@@ -8,10 +8,10 @@ use std::rc::Rc;
 // TODO make the numbers generic (not tied to f64)
 #[derive(Debug)]
 pub struct TensorStorage {
-    pub(crate) buffer: Rc<Vec<f64>>,
+    pub buffer: Rc<Vec<f64>>,
     pub shape: Vec<usize>,
-    pub(super) strides: Vec<usize>,
-    pub(super) contiguous: bool,
+    pub strides: Vec<usize>,
+    pub contiguous: bool,
     pub numel: usize,
     pub(super) offset: usize,
 }
@@ -38,7 +38,7 @@ impl TensorStorage {
 
     /// Wrap an already-completely-initialized contiguous buffer into a storage.
     /// The resulting tensor is a contiguous, offset-0 view of `buffer`.
-    pub(crate) fn from_buffer(shape: Vec<usize>, buffer: Vec<f64>) -> Self {
+    pub fn from_buffer(shape: Vec<usize>, buffer: Vec<f64>) -> Self {
         if !are_dims_positive(&shape) {
             panic!("Tensor shape must have positive dimensions. Got {shape:?}.")
         }

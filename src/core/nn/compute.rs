@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use rand::rngs::StdRng;
 
 use crate::core::{
-    GraphTensor,
     nn::module::{Forward1, Module},
+    GraphTensor,
 };
 
 pub struct Linear {

@@ -1,10 +1,10 @@
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Seek, SeekFrom};
 
-use crate::core::GraphTensor;
 use crate::core::node::TensorNode;
 use crate::core::storage::TensorStorage;
 use crate::core::tensor::AbstractTensor;
+use crate::core::GraphTensor;
 
 pub struct CovertypeDataset {
     pub path: String,

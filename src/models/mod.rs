@@ -1,10 +1,9 @@
 use std::collections::HashMap;
 
-use rand::{SeedableRng, rngs::StdRng};
+use rand::{rngs::StdRng, SeedableRng};
 
 use crate::{
     core::{
-        GraphTensor,
         nn::{
             activate::ReLU,
             compute::Linear,
@@ -12,6 +11,7 @@ use crate::{
             module::{Forward1, Module},
         },
         tensor::AbstractTensor,
+        GraphTensor,
     },
     data::dataloader::DataLoader,
 };

@@ -1,6 +1,6 @@
 use crate::core::{
-    GraphTensor,
     tensor::{AbstractTensor, FreeTensor},
+    GraphTensor,
 };
 
 // TODO use at and at_mut syntax  also in TensorStorage

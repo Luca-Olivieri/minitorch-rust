@@ -1,4 +1,4 @@
-use crate::core::{GraphTensor, tensor::AbstractTensor};
+use crate::core::{tensor::AbstractTensor, GraphTensor};
 use std::fmt::Debug;
 
 /// Generic backward-op container: stores operands, arity N, and the operation state.
