@@ -73,32 +73,6 @@ impl TensorStorage {
         Rc::get_mut(&mut self.buffer)
             .expect("Cannot mutate a buffer that is still shared by multiple storage views.")
     }
-
-    fn check_contiguity(&self) -> bool {
-        let contiguous_strides = init_strides(&self.shape);
-
-        for (i, c_stride) in contiguous_strides.iter().enumerate().take(self.shape.len()) {
-            if self.shape[i] == 1 {
-                continue;
-            };
-            if &self.strides[i] != c_stride {
-                return false;
-            }
-        }
-
-        true
-    }
-
-    fn item(&self) -> f64 {
-        if self.numel != 1 {
-            panic!(
-                "Cannot call item() on a non-singleton tensor (shape {:?}).",
-                self.shape
-            )
-        }
-
-        self.buffer[self.offset]
-    }
 }
 
 fn are_dims_positive(shape: &[usize]) -> bool {

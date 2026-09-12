@@ -209,7 +209,7 @@ impl BackwardPlan {
             if (retain_graph || self.is_leaf[i])
                 && let Some(g) = grad.take()
             {
-                    grads_map.insert(self.nodes[i].clone(), g);
+                grads_map.insert(self.nodes[i].clone(), g);
             }
         }
 

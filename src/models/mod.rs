@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use rand::{SeedableRng, rngs::StdRng};
 
 use crate::{
@@ -50,39 +48,18 @@ impl Forward1 for XORClassifier {
 }
 
 impl Module for XORClassifier {
-    fn modules(&self) -> HashMap<String, &dyn Module> {
-        let mut out_map = HashMap::new();
-        out_map.insert(String::from("linear_1"), &self.lin1 as &dyn Module);
-        out_map.insert(String::from("relu"), &self.relu as &dyn Module);
-        out_map.insert(String::from("linear_2"), &self.lin2 as &dyn Module);
-        out_map.insert(String::from("linear_3"), &self.lin3 as &dyn Module);
-
-        out_map
+    fn for_each_own_module(&self, f: &mut dyn FnMut(&str, &dyn Module)) {
+        f("linear_1", &self.lin1);
+        f("relu", &self.relu);
+        f("linear_2", &self.lin2);
+        f("linear_3", &self.lin3);
     }
 
-    fn modules_mut(&mut self) -> HashMap<String, &mut dyn Module> {
-        let mut out_map = HashMap::new();
-        out_map.insert(String::from("linear_1"), &mut self.lin1 as &mut dyn Module);
-        out_map.insert(String::from("relu"), &mut self.relu as &mut dyn Module);
-        out_map.insert(String::from("linear_2"), &mut self.lin2 as &mut dyn Module);
-        out_map.insert(String::from("linear_3"), &mut self.lin3 as &mut dyn Module);
-
-        out_map
-    }
-
-    fn parts_mut(
-        &mut self,
-    ) -> (
-        HashMap<String, &mut GraphTensor>,
-        HashMap<String, &mut dyn Module>,
-    ) {
-        let mut out_map = HashMap::new();
-        out_map.insert(String::from("linear_1"), &mut self.lin1 as &mut dyn Module);
-        out_map.insert(String::from("relu"), &mut self.relu as &mut dyn Module);
-        out_map.insert(String::from("linear_2"), &mut self.lin2 as &mut dyn Module);
-        out_map.insert(String::from("linear_3"), &mut self.lin3 as &mut dyn Module);
-
-        (HashMap::new(), out_map)
+    fn for_each_own_module_mut(&mut self, f: &mut dyn FnMut(&str, &mut dyn Module)) {
+        f("linear_1", &mut self.lin1);
+        f("relu", &mut self.relu);
+        f("linear_2", &mut self.lin2);
+        f("linear_3", &mut self.lin3);
     }
 }
 
@@ -143,38 +120,17 @@ impl Forward1 for CovertypeClassifier {
 }
 
 impl Module for CovertypeClassifier {
-    fn modules(&self) -> HashMap<String, &dyn Module> {
-        let mut out_map = HashMap::new();
-        out_map.insert(String::from("linear_1"), &self.lin1 as &dyn Module);
-        out_map.insert(String::from("relu"), &self.relu as &dyn Module);
-        out_map.insert(String::from("linear_2"), &self.lin2 as &dyn Module);
-        out_map.insert(String::from("linear_3"), &self.lin3 as &dyn Module);
-
-        out_map
+    fn for_each_own_module(&self, f: &mut dyn FnMut(&str, &dyn Module)) {
+        f("linear_1", &self.lin1);
+        f("relu", &self.relu);
+        f("linear_2", &self.lin2);
+        f("linear_3", &self.lin3);
     }
 
-    fn modules_mut(&mut self) -> HashMap<String, &mut dyn Module> {
-        let mut out_map = HashMap::new();
-        out_map.insert(String::from("linear_1"), &mut self.lin1 as &mut dyn Module);
-        out_map.insert(String::from("relu"), &mut self.relu as &mut dyn Module);
-        out_map.insert(String::from("linear_2"), &mut self.lin2 as &mut dyn Module);
-        out_map.insert(String::from("linear_3"), &mut self.lin3 as &mut dyn Module);
-
-        out_map
-    }
-
-    fn parts_mut(
-        &mut self,
-    ) -> (
-        HashMap<String, &mut GraphTensor>,
-        HashMap<String, &mut dyn Module>,
-    ) {
-        let mut out_map = HashMap::new();
-        out_map.insert(String::from("linear_1"), &mut self.lin1 as &mut dyn Module);
-        out_map.insert(String::from("relu"), &mut self.relu as &mut dyn Module);
-        out_map.insert(String::from("linear_2"), &mut self.lin2 as &mut dyn Module);
-        out_map.insert(String::from("linear_3"), &mut self.lin3 as &mut dyn Module);
-
-        (HashMap::new(), out_map)
+    fn for_each_own_module_mut(&mut self, f: &mut dyn FnMut(&str, &mut dyn Module)) {
+        f("linear_1", &mut self.lin1);
+        f("relu", &mut self.relu);
+        f("linear_2", &mut self.lin2);
+        f("linear_3", &mut self.lin3);
     }
 }

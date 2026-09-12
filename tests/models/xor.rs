@@ -83,10 +83,7 @@ fn xor_training_reduces_loss_and_tracks_recorded_trajectory() {
         let loss = criterion.forward(&logits, &oh);
         let grads_map = loss.backward(false);
 
-        {
-            let params = &mut model.all_params_mut();
-            optimizer.step(params, &grads_map);
-        }
+        optimizer.step(&mut model, &grads_map);
 
         if (epoch - 1) % 20 == 0 {
             let prs = softmax.forward(&logits);

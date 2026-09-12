@@ -3,7 +3,7 @@ use std::time::Instant;
 use minitorch_rust::core::GraphTensor;
 use minitorch_rust::core::nn::activate::Softmax;
 use minitorch_rust::core::nn::loss::{CrossEntropyLoss, Loss};
-use minitorch_rust::core::nn::module::{Forward1, Module};
+use minitorch_rust::core::nn::module::Forward1;
 use minitorch_rust::core::nn::optimizer::{Optimizer, SGD};
 use minitorch_rust::core::nn::smoothing::SimpleExpSmoothing;
 use minitorch_rust::core::tensor::{AbstractTensor, FreeTensor};
@@ -95,9 +95,7 @@ fn try_covertype() {
 
             let start = Instant::now();
 
-            let params = &mut model.all_params_mut();
-
-            optimizer.step(params, &grads_map);
+            optimizer.step(&mut model, &grads_map);
 
             let step_time = start.elapsed();
 
@@ -182,9 +180,7 @@ fn try_xor() {
 
         let start = Instant::now();
 
-        let params = &mut model.all_params_mut();
-
-        optimizer.step(params, &grads_map);
+        optimizer.step(&mut model, &grads_map);
 
         let step_time = start.elapsed();
 

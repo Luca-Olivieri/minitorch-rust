@@ -1,13 +1,9 @@
 use std::collections::HashMap;
 
-use crate::core::{GraphTensor, autograd::TensorKey};
+use crate::core::{GraphTensor, autograd::TensorKey, nn::module::Module};
 
 pub trait Optimizer {
-    fn step(
-        &self,
-        params: &mut HashMap<String, &mut GraphTensor>,
-        grads_map: &HashMap<TensorKey, GraphTensor>,
-    );
+    fn step(&self, model: &mut dyn Module, grads_map: &HashMap<TensorKey, GraphTensor>);
 }
 
 pub struct SGD {
@@ -21,17 +17,13 @@ impl SGD {
 }
 
 impl Optimizer for SGD {
-    fn step(
-        &self,
-        params: &mut HashMap<String, &mut GraphTensor>,
-        grads_map: &HashMap<TensorKey, GraphTensor>,
-    ) {
-        for param in params.values_mut() {
+    fn step(&self, model: &mut dyn Module, grads_map: &HashMap<TensorKey, GraphTensor>) {
+        model.for_each_param_mut(&mut |_, param| {
             if let Some(g) = grads_map.get(&param.to_key()) {
                 // param = param - lr * grad, fused in a single pass
                 let updated = param.sub_scaled(g, self.base_lr).detach(true);
-                **param = updated;
+                *param = updated;
             }
-        }
+        });
     }
 }

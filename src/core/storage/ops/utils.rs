@@ -18,10 +18,10 @@ where
         }
     } else {
         // strided path: resolve each logical index through the tensor's strides
-        for i in 0..first.numel {
+        out_buf.extend((0..first.numel).map(|i| {
             let vals: [f64; N] = std::array::from_fn(|j| operands[j][i]);
-            out_buf.push(op(vals));
-        }
+            op(vals)
+        }));
     }
 
     TensorStorage::from_buffer(first.shape.clone(), out_buf)

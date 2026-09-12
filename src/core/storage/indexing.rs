@@ -67,6 +67,7 @@ impl TensorStorage {
         if self.contiguous {
             l_idx + self.offset
         } else {
+            // TODO implement strided iterator to avoid this costly mod and div operations
             let mut offset = self.offset;
             let mut curr_idx = l_idx;
             for i in (0..self.shape.len()).rev() {

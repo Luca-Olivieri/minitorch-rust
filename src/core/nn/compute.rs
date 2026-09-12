@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use rand::rngs::StdRng;
 
 use crate::core::{
@@ -13,39 +11,18 @@ pub struct Linear {
 }
 
 impl Module for Linear {
-    fn params(&self) -> HashMap<String, &GraphTensor> {
-        let mut out_map = HashMap::new();
-        out_map.insert(String::from("weight"), &self.weight);
+    fn for_each_own_param(&self, f: &mut dyn FnMut(&str, &GraphTensor)) {
+        f("weight", &self.weight);
         if let Some(bias) = &self.bias {
-            out_map.insert(String::from("bias"), bias);
+            f("bias", bias);
         }
-
-        out_map
     }
 
-    fn params_mut(&mut self) -> HashMap<String, &mut GraphTensor> {
-        let mut out_map = HashMap::new();
-        out_map.insert(String::from("weight"), &mut self.weight);
+    fn for_each_own_param_mut(&mut self, f: &mut dyn FnMut(&str, &mut GraphTensor)) {
+        f("weight", &mut self.weight);
         if let Some(bias) = &mut self.bias {
-            out_map.insert(String::from("bias"), bias);
+            f("bias", bias);
         }
-
-        out_map
-    }
-
-    fn parts_mut(
-        &mut self,
-    ) -> (
-        HashMap<String, &mut GraphTensor>,
-        HashMap<String, &mut dyn Module>,
-    ) {
-        let mut out_params_map = HashMap::new();
-        out_params_map.insert(String::from("weight"), &mut self.weight);
-        if let Some(bias) = &mut self.bias {
-            out_params_map.insert(String::from("bias"), bias);
-        }
-
-        (out_params_map, HashMap::new())
     }
 }
 
