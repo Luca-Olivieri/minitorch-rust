@@ -1,18 +1,18 @@
 use std::time::Instant;
 
+use minitorch_rust::core::GraphTensor;
 use minitorch_rust::core::nn::activate::Softmax;
 use minitorch_rust::core::nn::loss::{CrossEntropyLoss, Loss};
 use minitorch_rust::core::nn::module::{Forward1, Module};
 use minitorch_rust::core::nn::optimizer::{Optimizer, SGD};
 use minitorch_rust::core::nn::smoothing::SimpleExpSmoothing;
 use minitorch_rust::core::tensor::{AbstractTensor, FreeTensor};
-use minitorch_rust::core::GraphTensor;
 use minitorch_rust::data::dataloader::DataLoader;
 use minitorch_rust::data::dataset::CovertypeDataset;
 use minitorch_rust::models::{CovertypeClassifier, XORClassifier};
 
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 macro_rules! timeit {
     ($fmt:literal; $($stmt:stmt;)*) => {
@@ -163,7 +163,7 @@ fn try_xor() {
 
     let softmax = Softmax::new();
 
-    println!("{}", &model.forward(&inputs).get_node().storage);
+    println!("{}", model.forward(&inputs).get_node().storage);
 
     for epoch in 0..num_epochs {
         let start = Instant::now();

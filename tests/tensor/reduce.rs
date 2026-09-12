@@ -1,5 +1,5 @@
-use minitorch_rust::core::tensor::{AbstractTensor, FreeTensor};
 use minitorch_rust::core::GraphTensor;
+use minitorch_rust::core::tensor::{AbstractTensor, FreeTensor};
 
 #[test]
 fn one_hot_encodes_last_dim_per_class() {

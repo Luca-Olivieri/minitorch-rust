@@ -1,11 +1,11 @@
+use minitorch_rust::core::GraphTensor;
 use minitorch_rust::core::nn::activate::ReLU;
 use minitorch_rust::core::nn::compute::Linear;
 use minitorch_rust::core::nn::module::Forward1;
 use minitorch_rust::core::tensor::AbstractTensor;
-use minitorch_rust::core::GraphTensor;
 
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 #[test]
 fn linear_relu_forward_and_backward() {

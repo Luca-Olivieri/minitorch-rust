@@ -1,7 +1,7 @@
+use crate::core::GraphTensor;
 use crate::core::nn::activate::LogSoftmax;
 use crate::core::nn::module::Forward1;
 use crate::core::tensor::AbstractTensor;
-use crate::core::GraphTensor;
 
 pub trait Loss {
     fn forward(&self, inputs: &GraphTensor, targets: &GraphTensor) -> GraphTensor;
@@ -16,6 +16,12 @@ impl CrossEntropyLoss {
         Self {
             log_softmax: LogSoftmax::new(),
         }
+    }
+}
+
+impl Default for CrossEntropyLoss {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

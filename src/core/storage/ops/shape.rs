@@ -208,14 +208,14 @@ impl TensorStorage {
     }
 
     pub fn broadcast(&self, b: &TensorStorage) -> TensorStorage {
-        Self::broadcast_to_shape(&self, &b.shape)
+        Self::broadcast_to_shape(self, &b.shape)
     }
 
     pub fn broadcast_to_shape(&self, shape: &Vec<usize>) -> TensorStorage {
-        if !self.is_broadcastable(&shape) {
+        if !self.is_broadcastable(shape) {
             panic!(
                 "Shape {:?} cannot be broadcasted to {:?}",
-                &self.shape, &shape
+                self.shape, shape
             );
         }
 
@@ -275,14 +275,14 @@ impl TensorStorage {
     }
 }
 
-fn unsqueeze_shape(shape: &Vec<usize>, dim: usize) -> Vec<usize> {
-    let mut out_shape = shape.clone();
+fn unsqueeze_shape(shape: &[usize], dim: usize) -> Vec<usize> {
+    let mut out_shape = shape.to_owned();
     out_shape.insert(dim, 1);
     out_shape
 }
 
-pub(crate) fn squeeze_shape(shape: &Vec<usize>, dim: usize) -> Vec<usize> {
-    let mut out_shape = shape.clone();
+pub(crate) fn squeeze_shape(shape: &[usize], dim: usize) -> Vec<usize> {
+    let mut out_shape = shape.to_owned();
     out_shape.remove(dim);
     out_shape
 }

@@ -1,13 +1,13 @@
+use minitorch_rust::core::GraphTensor;
 use minitorch_rust::core::nn::activate::Softmax;
 use minitorch_rust::core::nn::loss::{CrossEntropyLoss, Loss};
 use minitorch_rust::core::nn::module::{Forward1, Module};
 use minitorch_rust::core::nn::optimizer::{Optimizer, SGD};
 use minitorch_rust::core::tensor::{AbstractTensor, FreeTensor};
-use minitorch_rust::core::GraphTensor;
 use minitorch_rust::models::XORClassifier;
 
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 fn xor_inputs() -> GraphTensor {
     let mut inputs_f = FreeTensor::new(vec![4, 2], 0.0, false);

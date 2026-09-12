@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 
-use rand::{rngs::StdRng, SeedableRng};
+use rand::{SeedableRng, rngs::StdRng};
 
 use crate::{
     core::{
+        GraphTensor,
         nn::{
             activate::ReLU,
             compute::Linear,
@@ -11,7 +12,6 @@ use crate::{
             module::{Forward1, Module},
         },
         tensor::AbstractTensor,
-        GraphTensor,
     },
     data::dataloader::DataLoader,
 };
@@ -41,12 +41,11 @@ impl XORClassifier {
 
 impl Forward1 for XORClassifier {
     fn forward(&self, input: &GraphTensor) -> GraphTensor {
-        let y1 = self.lin1.forward(&input);
+        let y1 = self.lin1.forward(input);
         let y2 = self.relu.forward(&y1);
         let y3 = self.lin2.forward(&y2);
         let y4 = self.relu.forward(&y3);
-        let logits = self.lin3.forward(&y4);
-        logits
+        self.lin3.forward(&y4) // logits
     }
 }
 
@@ -135,12 +134,11 @@ impl CovertypeClassifier {
 
 impl Forward1 for CovertypeClassifier {
     fn forward(&self, input: &GraphTensor) -> GraphTensor {
-        let y1 = self.lin1.forward(&input);
+        let y1 = self.lin1.forward(input);
         let y2 = self.relu.forward(&y1);
         let y3 = self.lin2.forward(&y2);
         let y4 = self.relu.forward(&y3);
-        let logits = self.lin3.forward(&y4);
-        logits
+        self.lin3.forward(&y4) // logits
     }
 }
 

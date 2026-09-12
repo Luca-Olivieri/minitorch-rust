@@ -5,8 +5,8 @@ use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
-use crate::core::node::TensorNode;
 use crate::core::GraphTensor;
+use crate::core::node::TensorNode;
 
 pub struct TensorKey {
     node: Rc<TensorNode>, // TODO or use GraphTensor directly
@@ -128,8 +128,9 @@ impl BackwardPlan {
 
         let node_count = nodes.len();
         let mut base_in_degree = vec![0usize; node_count];
-        for u in 0..node_count {
-            for &v in &operands[u] {
+
+        for operand in operands.iter().take(node_count) {
+            for &v in operand {
                 base_in_degree[v] += 1;
             }
         }
@@ -205,10 +206,10 @@ impl BackwardPlan {
         // gradient so they can fetch intermediates.
         let mut grads_map = HashMap::new();
         for (i, grad) in self.grads.iter_mut().enumerate() {
-            if retain_graph || self.is_leaf[i] {
-                if let Some(g) = grad.take() {
+            if (retain_graph || self.is_leaf[i])
+                && let Some(g) = grad.take()
+            {
                     grads_map.insert(self.nodes[i].clone(), g);
-                }
             }
         }
 
@@ -227,7 +228,7 @@ impl BackwardPlan {
 /// the allocating sum when the buffer cannot be mutated (shared/aliased or
 /// strided).
 fn accumulate_grad(
-    grads: &mut Vec<Option<GraphTensor>>,
+    grads: &mut [Option<GraphTensor>],
     v: usize,
     op_grad: &GraphTensor,
     retain_graph: bool,

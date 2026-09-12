@@ -28,10 +28,10 @@ impl TensorStorage {
 
         Self {
             buffer: Rc::new(vec![fill_value; numel]),
-            shape: shape,
-            strides: strides,
+            shape,
+            strides,
             contiguous: true,
-            numel: numel,
+            numel,
             offset: 0,
         }
     }
@@ -56,10 +56,10 @@ impl TensorStorage {
 
         Self {
             buffer: Rc::new(buffer),
-            shape: shape,
-            strides: strides,
+            shape,
+            strides,
             contiguous: true,
-            numel: numel,
+            numel,
             offset: 0,
         }
     }
@@ -77,11 +77,11 @@ impl TensorStorage {
     fn check_contiguity(&self) -> bool {
         let contiguous_strides = init_strides(&self.shape);
 
-        for i in 0..self.shape.len() {
+        for (i, c_stride) in contiguous_strides.iter().enumerate().take(self.shape.len()) {
             if self.shape[i] == 1 {
                 continue;
             };
-            if self.strides[i] != contiguous_strides[i] {
+            if &self.strides[i] != c_stride {
                 return false;
             }
         }
@@ -101,7 +101,7 @@ impl TensorStorage {
     }
 }
 
-fn are_dims_positive(shape: &Vec<usize>) -> bool {
+fn are_dims_positive(shape: &[usize]) -> bool {
     shape.iter().all(|&dim| dim != 0)
 }
 
@@ -113,7 +113,7 @@ fn compute_numel_from_shape(shape: &Vec<usize>) -> usize {
     numel
 }
 
-fn init_strides(shape: &Vec<usize>) -> Vec<usize> {
+fn init_strides(shape: &[usize]) -> Vec<usize> {
     let mut strides = vec![1; shape.len()];
     let mut curr_stride: usize = 1;
     for i in (0..shape.len()).rev() {

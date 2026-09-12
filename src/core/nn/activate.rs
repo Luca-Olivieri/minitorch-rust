@@ -1,7 +1,7 @@
 use crate::core::{
+    GraphTensor,
     nn::module::{Forward1, Module},
     tensor::AbstractTensor,
-    GraphTensor,
 };
 
 pub struct ReLU {}
@@ -14,6 +14,12 @@ impl ReLU {
     }
 }
 
+impl Default for ReLU {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Forward1 for ReLU {
     fn forward(&self, input: &GraphTensor) -> GraphTensor {
         // the scalar broadcasts to the input shape, so no full-size zeros tensor is allocated
@@ -23,6 +29,12 @@ impl Forward1 for ReLU {
 }
 
 pub struct LogSoftmax {}
+
+impl Default for LogSoftmax {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Module for LogSoftmax {}
 
@@ -49,6 +61,12 @@ impl Forward1 for LogSoftmax {
 }
 
 pub struct Softmax {}
+
+impl Default for Softmax {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Module for Softmax {}
 

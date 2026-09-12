@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::core::{tensor::AbstractTensor, GraphTensor};
+use crate::core::{GraphTensor, tensor::AbstractTensor};
 
 // TODO should Module have both parameters AND modules (not just one of those at a time)?
 
@@ -31,7 +31,7 @@ pub trait Module {
             for (c_mod_name, c_box_mod) in child_params {
                 let mut full_name = String::from(child_mod_name);
                 if !c_mod_name.is_empty() {
-                    full_name.push_str(".");
+                    full_name.push('.');
                     full_name.push_str(&c_mod_name);
                 }
                 out_map.insert(full_name, c_box_mod);

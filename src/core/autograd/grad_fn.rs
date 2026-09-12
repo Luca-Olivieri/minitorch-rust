@@ -1,4 +1,4 @@
-use crate::core::{tensor::AbstractTensor, GraphTensor};
+use crate::core::{GraphTensor, tensor::AbstractTensor};
 use std::fmt::Debug;
 
 /// Generic backward-op container: stores operands, arity N, and the operation state.
@@ -58,10 +58,8 @@ impl<Op: GradRule<N>, const N: usize> ComputesGrads for NBackwardOp<Op, N> {
             .compute_grad(&self.operands, in_grad, retain_graph, out);
 
         if !retain_graph {
-            for grad in out.iter_mut() {
-                if let Some(g) = grad {
-                    g.get_node_mut().grad_fn = None;
-                }
+            for g in out.iter_mut().flatten() {
+                g.get_node_mut().grad_fn = None;
             }
         }
     }

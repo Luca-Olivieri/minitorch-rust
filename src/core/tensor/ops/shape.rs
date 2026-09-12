@@ -1,8 +1,8 @@
 use std::rc::Rc;
 
+use crate::core::GraphTensor;
 use crate::core::node::TensorNode;
 use crate::core::tensor::AbstractTensor;
-use crate::core::GraphTensor;
 
 use crate::core::autograd::grad_fn::GradFnTrait;
 use crate::core::autograd::ops::shape::{
@@ -18,7 +18,7 @@ impl GraphTensor {
             |ops: &[&TensorStorage; 1]| TensorStorage::copy_d(ops[0]),
             Some(|operands: [GraphTensor; 1]| {
                 Box::new(BackwardCopyD {
-                    operands: operands,
+                    operands,
                     op: CopyDOp {},
                 }) as Box<dyn GradFnTrait>
             }),
@@ -31,7 +31,7 @@ impl GraphTensor {
             |ops: &[&TensorStorage; 1]| TensorStorage::unsqueeze(ops[0], dim),
             Some(|operands: [GraphTensor; 1]| {
                 Box::new(BackwardUnsqueeze {
-                    operands: operands,
+                    operands,
                     op: UnsqueezeOp { dim },
                 }) as Box<dyn GradFnTrait>
             }),
@@ -44,7 +44,7 @@ impl GraphTensor {
             |ops: &[&TensorStorage; 1]| TensorStorage::squeeze(ops[0], dim),
             Some(|operands: [GraphTensor; 1]| {
                 Box::new(BackwardSqueeze {
-                    operands: operands,
+                    operands,
                     op: SqueezeOp { dim },
                 }) as Box<dyn GradFnTrait>
             }),
@@ -77,7 +77,7 @@ impl GraphTensor {
             |ops: &[&TensorStorage; 1]| TensorStorage::expand(ops[0], dim, times),
             Some(|operands: [GraphTensor; 1]| {
                 Box::new(BackwardExpand {
-                    operands: operands,
+                    operands,
                     op: ExpandOp { dim },
                 }) as Box<dyn GradFnTrait>
             }),
@@ -86,7 +86,7 @@ impl GraphTensor {
     }
 
     pub fn broadcast(&self, b: &GraphTensor) -> GraphTensor {
-        Self::broadcast_to_shape(&self, &b.shape())
+        Self::broadcast_to_shape(self, b.shape())
     }
 
     pub fn broadcast_to_shape(&self, target_shape: &Vec<usize>) -> GraphTensor {

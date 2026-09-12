@@ -32,7 +32,7 @@ impl TensorStorage {
         true
     }
 
-    pub(super) fn md_to_flat(&self, md_idx: &Vec<usize>) -> usize {
+    pub(super) fn md_to_flat(&self, md_idx: &[usize]) -> usize {
         if md_idx.len() != self.shape.len() {
             panic!(
                 "Index size {} does not match tensor shape size {}.",
@@ -43,14 +43,14 @@ impl TensorStorage {
 
         // flat index computation
         let mut flat_index = self.offset;
-        for i in 0..self.shape.len() {
-            if md_idx[i] >= self.shape[i] {
+        for (i, d_idx) in md_idx.iter().enumerate().take(self.shape.len()) {
+            if d_idx >= &self.shape[i] {
                 panic!(
                     "Index {} out of bounds for dimension {} of size {}.",
-                    md_idx[i], i, self.shape[i]
+                    d_idx, i, self.shape[i]
                 );
             }
-            flat_index += self.strides[i] * md_idx[i];
+            flat_index += self.strides[i] * d_idx;
         }
 
         flat_index

@@ -1,5 +1,5 @@
-use minitorch_rust::core::tensor::AbstractTensor;
 use minitorch_rust::core::GraphTensor;
+use minitorch_rust::core::tensor::AbstractTensor;
 
 fn assert_shape(t: &GraphTensor, expected: &[usize]) {
     assert_eq!(t.shape(), expected, "shape mismatch for {t:?}");

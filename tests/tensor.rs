@@ -5,8 +5,8 @@ mod reduce;
 #[path = "tensor/shape.rs"]
 mod shape;
 
-use minitorch_rust::core::tensor::AbstractTensor;
 use minitorch_rust::core::GraphTensor;
+use minitorch_rust::core::tensor::AbstractTensor;
 
 #[test]
 fn from_vec_scalar() {

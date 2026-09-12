@@ -6,16 +6,16 @@ use crate::core::storage::TensorStorage;
 
 impl fmt::Display for TensorStorage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Tensor(shape={:?}, dtype=float,\n", self.shape)?; // TODO insert TensorStorage, and fix padding
-        write!(
+        writeln!(f, "Tensor(shape={:?}, dtype=float,", self.shape)?; // TODO insert TensorStorage, and fix padding // TODO insert TensorStorage, and fix padding
+        writeln!(
             f,
-            "       numel={}, strides={:?}, contiguous={}, offset={},\n",
+            "       numel={}, strides={:?}, contiguous={}, offset={},",
             self.numel, self.strides, self.contiguous, self.offset
         )?;
         write!(f, "       data=")?;
 
         if self.shape.is_empty() {
-            if let Some(&val) = self.buffer.get(0) {
+            if let Some(&val) = self.buffer.first() {
                 write!(f, "{:.4}", val)?;
             }
         } else {

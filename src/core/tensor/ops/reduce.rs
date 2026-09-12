@@ -6,10 +6,10 @@ use crate::core::autograd::grad_fn::GradFnTrait;
 use crate::core::autograd::ops::math::{BackwardMatmul, MatmulOp};
 use crate::core::autograd::ops::reduce::{BackwardMax, BackwardSum, MaxOp, SumOp};
 use crate::core::node::TensorNode;
-use crate::core::storage::ops::reduce::resolve_dims;
 use crate::core::storage::TensorStorage;
-use crate::core::tensor::ops::math::apply_tensor_op;
+use crate::core::storage::ops::reduce::resolve_dims;
 use crate::core::tensor::AbstractTensor;
+use crate::core::tensor::ops::math::apply_tensor_op;
 
 impl GraphTensor {
     /// Sum over every dimension in `dims` at once.

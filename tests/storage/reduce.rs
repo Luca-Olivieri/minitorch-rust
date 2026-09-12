@@ -1,8 +1,8 @@
 use std::hint::black_box;
 use std::time::{Duration, Instant};
 
-use minitorch_rust::core::storage::ops::reduce::reduce_dims;
 use minitorch_rust::core::storage::TensorStorage;
+use minitorch_rust::core::storage::ops::reduce::reduce_dims;
 
 // The `max` kernel before `max_all` existed: the generic reduce_dims odometer.
 fn old_max_odometer(a: &TensorStorage) -> TensorStorage {

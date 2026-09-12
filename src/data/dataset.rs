@@ -1,9 +1,6 @@
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Seek, SeekFrom};
 
-use crate::core::node::TensorNode;
-use crate::core::storage::TensorStorage;
-use crate::core::tensor::AbstractTensor;
 use crate::core::GraphTensor;
 
 pub struct CovertypeDataset {
@@ -17,7 +14,7 @@ impl CovertypeDataset {
     pub fn new(path: String, limit: Option<usize>) -> Self {
         let file_res = File::open(&path);
         if file_res.is_err() {
-            panic!("Could not open file {}", &path);
+            panic!("Could not open file {}", path);
         }
 
         let file = file_res.unwrap();
@@ -25,15 +22,19 @@ impl CovertypeDataset {
         let lut = Self::build_lut(&file).unwrap();
 
         Self {
-            path: path,
-            len: limit.unwrap_or_else(|| lut.len()),
+            path,
+            len: limit.unwrap_or(lut.len()),
             reader: BufReader::new(file),
-            lut: lut,
+            lut,
         }
     }
 
     pub fn len(&self) -> usize {
         self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
     }
 
     fn build_lut(file: &File) -> io::Result<Vec<u64>> {
@@ -78,7 +79,7 @@ impl CovertypeDataset {
         let mut line = String::new();
         let res = self.reader.read_line(&mut line);
         if res.is_err() {
-            panic!("Could not read line {} of file at path {}", idx, &self.path);
+            panic!("Could not read line {} of file at path {}", idx, self.path);
         }
 
         let mut buffer: Vec<f64> = line

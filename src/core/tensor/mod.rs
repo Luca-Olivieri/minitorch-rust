@@ -7,11 +7,6 @@ use std::rc::Rc;
 use crate::core::node::TensorNode;
 use crate::core::storage::TensorStorage;
 
-#[derive(Debug)]
-pub struct Tensor<'a> {
-    g_tensor: &'a GraphTensor,
-}
-
 pub trait AbstractTensor {
     fn get_node(&self) -> &TensorNode;
 
@@ -47,7 +42,7 @@ pub struct FreeTensor {
 
 impl AbstractTensor for FreeTensor {
     fn get_node(&self) -> &TensorNode {
-        &self.node.as_ref()
+        self.node.as_ref()
     }
 
     fn get_node_mut(&mut self) -> &mut TensorNode {
@@ -169,7 +164,7 @@ impl<T: IntoNestedStorage> IntoNestedStorage for Vec<T> {
 
 impl AbstractTensor for GraphTensor {
     fn get_node(&self) -> &TensorNode {
-        &self.node.as_ref()
+        self.node.as_ref()
     }
 
     fn get_node_mut(&mut self) -> &mut TensorNode {

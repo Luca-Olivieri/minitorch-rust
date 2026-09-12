@@ -19,7 +19,7 @@ impl TensorNode {
 
     pub fn from_storage(storage: TensorStorage, requires_grad: bool) -> Self {
         Self {
-            storage: storage,
+            storage,
             requires_grad,
             grad_fn: None,
         }

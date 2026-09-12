@@ -1,4 +1,4 @@
-use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
+use rand::{SeedableRng, rngs::StdRng, seq::SliceRandom};
 
 use crate::core::GraphTensor;
 use crate::data::dataset::CovertypeDataset;

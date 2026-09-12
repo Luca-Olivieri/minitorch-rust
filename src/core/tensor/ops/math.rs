@@ -10,7 +10,7 @@ use crate::core::autograd::ops::math::{
 use crate::core::node::TensorNode;
 use crate::core::storage::TensorStorage;
 use crate::core::tensor::extract_requires_grad;
-use crate::core::tensor::{AbstractTensor, GraphTensor};
+use crate::core::tensor::GraphTensor;
 
 impl GraphTensor {
     impl_tensor_unary_op!(ln, TensorStorage::ln, BackwardLn, LnOp);
