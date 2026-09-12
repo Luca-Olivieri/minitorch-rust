@@ -32,8 +32,6 @@ impl GradRule<1> for LnOp {
         // dy/da = 1 / a
         let a = &operands[0];
 
-        // TODO should do inplace operations if retain_graph = False
-
         out.push(a.requires_grad().then(|| in_grad / a));
     }
 }

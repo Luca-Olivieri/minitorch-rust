@@ -18,7 +18,7 @@ impl Linear {
     pub fn new(in_features: usize, out_features: usize, has_bias: bool, rng: StdRng) -> Self {
         // Xavier/Glorot uniform initialization to break symmetry between units
         let w_shape = vec![in_features, out_features];
-        let weight = GraphTensor::init_xavier_uniform(w_shape, true, rng); // TODO set rng
+        let weight = GraphTensor::init_xavier_uniform(w_shape, true, rng);
 
         let bias = if has_bias {
             Some(GraphTensor::new(vec![out_features], 0.0, true))

@@ -104,10 +104,6 @@ impl Index<usize> for TensorStorage {
     }
 }
 
-// TODO see if it makes sense to validate md_idx before fetching the data
-
-// TODO alternatively, the two IdexMut methods down here can be removed, and when they are used,
-// modify the flat_data directly BEFORE giving it to the TensorStorage
 impl IndexMut<&[usize]> for TensorStorage {
     fn index_mut(&mut self, md_idx: &[usize]) -> &mut f64 {
         let f_idx = self.md_to_flat(md_idx);

@@ -55,6 +55,7 @@ fn main() {
     );
 
     let num_epochs = 20;
+    let epoch_w = num_epochs.to_string().len();
 
     let loss_smoothing_factor = 1e-1;
     let mut epoch_loss_smoother = SimpleExpSmoothing::new(loss_smoothing_factor);
@@ -69,6 +70,7 @@ fn main() {
         timeit!("Training epoch completed (took {elapsed})";
         for step in 0..train_dl.size() {
             let step_viz = step+1;
+            let step_w = train_dl.size().to_string().len();
 
             let (inputs, targets) = train_dl.get_batch(step);
 
@@ -96,14 +98,14 @@ fn main() {
             num_steps += 1;
 
             if (epoch+1) % 2 == 0 && (step+1) == 1000 {
-                println!("=== [EPOCH {epoch_viz}/{num_epochs}] STEP {step_viz}/{num_steps} === "); // TODO implement correctly padded numbers
+                println!("=== [EPOCH {epoch_viz:>epoch_w$}/{num_epochs}] STEP {step_viz:>step_w$}/{num_steps} ===");
                 dbg!(forward_time, loss_time, backward_time, step_time, grads_map.len());
             }
         };);
 
         if (epoch + 1) % 2 == 0 {
             println!(
-                "=== [EPOCH {epoch_viz}/{num_epochs}] avg. train loss = {} over {num_steps} steps ===",
+                "=== [EPOCH {epoch_viz:>epoch_w$}/{num_epochs}] avg. train loss = {} over {num_steps} steps ===",
                 epoch_loss_smoother.value()
             );
         }
@@ -112,7 +114,7 @@ fn main() {
 
         if (epoch + 1) % 2 == 0 {
             println!(
-                "=== [EPOCH {epoch_viz}/{num_epochs}] val. loss = {:?} ===",
+                "=== [EPOCH {epoch_viz:>epoch_w$}/{num_epochs}] val. loss = {:?} ===",
                 epoch_val_loss.item()
             );
         }

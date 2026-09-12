@@ -118,35 +118,9 @@ fn broadcast_shape(shapes: &[&[usize]]) -> Vec<usize> {
     out
 }
 
-// TODO make this scalar operations into a macro
-impl Add<f64> for &GraphTensor {
-    type Output = GraphTensor;
-    fn add(self, other: f64) -> GraphTensor {
-        let other_t = GraphTensor::new(vec![], other, false);
-        self + &other_t
-    }
-}
-
-impl Sub<f64> for &GraphTensor {
-    type Output = GraphTensor;
-    fn sub(self, other: f64) -> GraphTensor {
-        let other_t = GraphTensor::new(vec![], other, false);
-        self - &other_t
-    }
-}
-
-impl Mul<f64> for &GraphTensor {
-    type Output = GraphTensor;
-    fn mul(self, other: f64) -> GraphTensor {
-        let other_t = GraphTensor::new(vec![], other, false);
-        self * &other_t
-    }
-}
-
-impl Div<f64> for &GraphTensor {
-    type Output = GraphTensor;
-    fn div(self, other: f64) -> GraphTensor {
-        let other_t = GraphTensor::new(vec![], other, false);
-        self / &other_t
-    }
+impl_tensor_scalar_ops! {
+    Add, add;
+    Sub, sub;
+    Mul, mul;
+    Div, div;
 }

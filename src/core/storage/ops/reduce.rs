@@ -47,6 +47,48 @@ impl TensorStorage {
         )
     }
 
+    /// One-hot encode `source`'s labels into a fresh contiguous storage of shape
+    /// `source.shape ++ [num_classes]`, validating the labels as they are read.
+    pub fn one_hot(source: &TensorStorage, num_classes: usize) -> TensorStorage {
+        let mut out_shape = source.shape.clone();
+        out_shape.push(num_classes);
+
+        // Validate while reading; the flat output index of (input i, class c) is
+        // `i * num_classes + c`, so materializing the labels lets `from_fn` write
+        // the output buffer exactly once (no up-front zero-fill).
+        let labels: Vec<usize> = source
+            .strided_indices()
+            .enumerate()
+            .map(|(i, f)| {
+                let raw = source.buffer[f];
+                if raw.fract() != 0.0 {
+                    panic!("One-hotted tensor has value {raw} with fractional part at index {i}.")
+                }
+                if raw < 0.0 {
+                    panic!("One-hotted tensor has negative value {raw} at index {i}.")
+                }
+                let cls = raw as usize;
+                if cls >= num_classes {
+                    panic!(
+                        "One-hotting with num_classes={} but tensor has value {} at index {}",
+                        num_classes - 1,
+                        raw,
+                        i
+                    )
+                }
+                cls
+            })
+            .collect();
+
+        TensorStorage::from_fn(out_shape, |f| {
+            if labels[f / num_classes] == f % num_classes {
+                1.0
+            } else {
+                0.0
+            }
+        })
+    }
+
     /// Reduce over every dimension in a single pass, yielding a scalar `[]`.
     fn sum_all(a: &TensorStorage) -> TensorStorage {
         if a.contiguous {

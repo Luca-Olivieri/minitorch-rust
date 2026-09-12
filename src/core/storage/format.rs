@@ -2,11 +2,10 @@ use std::fmt;
 
 use crate::core::storage::TensorStorage;
 
-// TODO implementing fmt::Display for TensorStorage is very convenient to print it easily, but in practice you should only dbg!, since TensorStorage is not meant to be exposed to the user
-
 impl fmt::Display for TensorStorage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Tensor(shape={:?}, dtype=float,", self.shape)?; // TODO insert TensorStorage, and fix padding // TODO insert TensorStorage, and fix padding
+        let data_indent = "       data=".len();
+        writeln!(f, "Tensor(shape={:?}, dtype=float,", self.shape)?;
         writeln!(
             f,
             "       numel={}, strides={:?}, contiguous={}, offset={},",
@@ -20,7 +19,7 @@ impl fmt::Display for TensorStorage {
             }
         } else {
             let mut curr_md_idx: Vec<usize> = Vec::new();
-            self.print_recursive(f, 0, &mut curr_md_idx, 12)?;
+            self.print_recursive(f, 0, &mut curr_md_idx, data_indent)?;
         }
 
         write!(f, ")")

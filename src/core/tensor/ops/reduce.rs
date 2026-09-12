@@ -98,50 +98,8 @@ impl GraphTensor {
         )
     }
 
-    // TODO should I kep all the logic here or place the TensorStorage part in that class?
-    pub fn one_hot(
-        &self,
-        num_classes: usize, // TODO is this the best integer type here?
-    ) -> GraphTensor {
-        let in_shape = self.shape();
-        let in_numel = self.numel();
-
-        // Build output shape by appending classes as the last dimension
-        let mut out_shape = (*in_shape).clone();
-        out_shape.push(num_classes);
-
-        let mut out_storage = TensorStorage::new(out_shape, 0.0); // TODO see if you can have this uninit
-
-        // `out_storage` is freshly allocated, so its Rc is unique and mutable.
-        let out_buf = out_storage.buffer_mut();
-
-        // The output is contiguous with the input coords followed by the class dim,
-        // so the flat output index of (input logical index i, class cls) is i*num_classes + cls.
-        let in_buffer = &self.node.storage.buffer;
-        let mut flat_iter = self.node.storage.strided_indices();
-        for i in 0..in_numel {
-            let raw_value = in_buffer[flat_iter.next().unwrap()];
-            if raw_value.fract() != 0.0 {
-                panic!("One-hotted tensor has value {raw_value} with fractional part at index {i}.")
-            }
-
-            if raw_value < 0.0 {
-                panic!("One-hotted tensor has negative value {raw_value} at index {i}.")
-            }
-
-            let cls = raw_value as usize; // TODO is this the best integer type here?
-
-            if cls >= num_classes {
-                panic!(
-                    "One-hotting with num_classes={} but tensor has value {} at index {}",
-                    num_classes - 1,
-                    raw_value,
-                    i
-                )
-            }
-
-            out_buf[i * num_classes + cls] = 1.0;
-        }
+    pub fn one_hot(&self, num_classes: usize) -> GraphTensor {
+        let out_storage = TensorStorage::one_hot(&self.node.storage, num_classes);
 
         let out_node = TensorNode {
             storage: out_storage,

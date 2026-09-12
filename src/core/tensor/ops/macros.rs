@@ -71,6 +71,20 @@ macro_rules! impl_tensor_binary_op {
     };
 }
 
+macro_rules! impl_tensor_scalar_ops {
+    ($($trait:ident, $method:ident);* $(;)?) => {
+        $(
+            impl $trait<f64> for &GraphTensor {
+                type Output = GraphTensor;
+                fn $method(self, other: f64) -> GraphTensor {
+                    let other_t = GraphTensor::new(vec![], other, false);
+                    self.$method(&other_t)
+                }
+            }
+        )*
+    };
+}
+
 macro_rules! impl_tensor_unary_ops {
     ($($trait:ident, $method:ident, $storage_fn:path, $grad_fn:ident, $grad_rule:ident);* $(;)?) => {
         $(

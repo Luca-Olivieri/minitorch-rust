@@ -21,7 +21,7 @@ impl TensorStorage {
 
     /// out[i] = a[i] - scale * b[i], fused into a single pass.
     pub fn sub_scaled(a: &TensorStorage, b: &TensorStorage, scale: f64) -> TensorStorage {
-        crate::core::storage::ops::utils::apply_op(&[a, b], |[av, bv]: [f64; 2]| av - scale * bv)
+        crate::core::storage::ops::utils::apply_op(&[a, b], |&[av, bv]| av - scale * bv)
     }
 
     /// Direct [m,k] x [k,n] -> [m,n] GEMM kernel.

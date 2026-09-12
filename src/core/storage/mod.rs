@@ -18,7 +18,6 @@ pub(crate) struct TensorStorage {
 }
 
 impl TensorStorage {
-    // TODO: might think of a constructor which does not initialize the whole flat_data, so that you can iterate through it when building a new flat_data
     pub(crate) fn new(shape: Vec<usize>, fill_value: f64) -> Self {
         if !are_dims_positive(&shape) {
             panic!("Tensor shape must have positive dimensions. Got {shape:?}.")
@@ -29,6 +28,32 @@ impl TensorStorage {
 
         Self {
             buffer: Rc::new(vec![fill_value; numel]),
+            shape,
+            strides,
+            contiguous: true,
+            numel,
+            offset: 0,
+        }
+    }
+
+    /// Build a storage by computing each element from its flat index.
+    ///
+    /// Unlike [`Self::new`], there is no up-front fill pass: callers that
+    /// overwrite every entry anyway (e.g. `one_hot`) write the buffer exactly
+    /// once.
+    pub(crate) fn from_fn<F>(shape: Vec<usize>, mut f: F) -> Self
+    where
+        F: FnMut(usize) -> f64,
+    {
+        if !are_dims_positive(&shape) {
+            panic!("Tensor shape must have positive dimensions. Got {shape:?}.")
+        }
+
+        let numel = compute_numel_from_shape(&shape);
+        let strides = init_strides(&shape);
+
+        Self {
+            buffer: Rc::new((0..numel).map(&mut f).collect()),
             shape,
             strides,
             contiguous: true,

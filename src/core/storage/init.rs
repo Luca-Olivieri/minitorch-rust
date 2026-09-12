@@ -9,10 +9,14 @@ impl TensorStorage {
         if !are_dims_positive(&shape) {
             panic!("Tensor shape must have positive dimensions. Got {shape:?}.")
         }
+        if shape.len() != 2 {
+            panic!("Xavier uniform requires a 2D [in, out] shape. Got {shape:?}.")
+        }
         let numel = compute_numel_from_shape(&shape);
         let strides = init_strides(&shape);
         let limit = (6.0 / (shape[0] + shape[1]) as f64).sqrt();
-        let dist = Uniform::new(-limit, limit).unwrap(); // TODO: proper error handling
+        // limit > 0 and finite for positive dims, so the range is always valid.
+        let dist = Uniform::new(-limit, limit).unwrap();
 
         let buffer: Vec<f64> = (0..numel).map(|_| dist.sample(&mut rng)).collect();
 

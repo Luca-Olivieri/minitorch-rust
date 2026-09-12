@@ -3,7 +3,7 @@ use crate::core::storage::iter::StridedIter;
 
 pub fn apply_op<F, const N: usize>(operands: &[&TensorStorage; N], op: F) -> TensorStorage
 where
-    F: Fn([f64; N]) -> f64, // TODO should I pass this slice as a reference?
+    F: Fn(&[f64; N]) -> f64,
 {
     let first = operands[0];
 
@@ -15,7 +15,7 @@ where
         let offsets: [usize; N] = std::array::from_fn(|j| operands[j].offset);
         for i in 0..first.numel {
             let vals: [f64; N] = std::array::from_fn(|j| operands[j].buffer[offsets[j] + i]);
-            out_buf.push(op(vals));
+            out_buf.push(op(&vals));
         }
     } else if let Some(run) = common_inner_run(operands) {
         // inner-run path: every operand is flat-contiguous over the trailing
@@ -45,7 +45,7 @@ where
             let bases: [usize; N] = std::array::from_fn(|j| iters[j].next().unwrap());
             for i in 0..run {
                 let vals: [f64; N] = std::array::from_fn(|j| operands[j].buffer[bases[j] + i]);
-                out_buf.push(op(vals));
+                out_buf.push(op(&vals));
             }
         }
     } else {
@@ -61,7 +61,7 @@ where
                 Some(it) => operands[j].buffer[it.next().unwrap()],
                 None => operands[j].buffer[offsets[j] + i],
             });
-            out_buf.push(op(vals));
+            out_buf.push(op(&vals));
         }
     }
 

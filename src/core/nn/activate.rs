@@ -77,7 +77,7 @@ impl Forward1 for Softmax {
     fn forward(&self, input: &GraphTensor) -> GraphTensor {
         let ndim = input.shape().len();
         if ndim == 0 {
-            GraphTensor::new(input.shape().clone(), 1.0, false); // TODO does the requires_grad make sense?
+            return GraphTensor::new(input.shape().clone(), 1.0, false);
         }
 
         let dim = ndim - 1; // softmax over the last dimension
