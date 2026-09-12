@@ -3,12 +3,7 @@ use rand::{SeedableRng, rngs::StdRng};
 use crate::{
     core::{
         GraphTensor,
-        nn::{
-            activate::ReLU,
-            compute::Linear,
-            loss::Loss,
-            module::Forward1,
-        },
+        nn::{activate::ReLU, compute::Linear, loss::Loss, module::Forward1},
         tensor::AbstractTensor,
     },
     data::dataloader::DataLoader,
@@ -18,10 +13,12 @@ use crate::modules;
 
 modules! {
     XORClassifier {
-        lin1: Linear,
-        relu: ReLU,
-        lin2: Linear,
-        lin3: Linear,
+        modules {
+            lin1: Linear,
+            relu: ReLU,
+            lin2: Linear,
+            lin3: Linear,
+        }
     }
 }
 
@@ -48,10 +45,12 @@ impl Forward1 for XORClassifier {
 
 modules! {
     CovertypeClassifier {
-        lin1: Linear,
-        relu: ReLU,
-        lin2: Linear,
-        lin3: Linear,
+        modules {
+            lin1: Linear,
+            relu: ReLU,
+            lin2: Linear,
+            lin3: Linear,
+        }
     }
 }
 

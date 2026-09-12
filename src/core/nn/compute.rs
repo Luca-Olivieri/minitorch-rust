@@ -24,6 +24,22 @@ impl Module for Linear {
             f("bias", bias);
         }
     }
+
+    fn param(&self, name: &str) -> Option<&GraphTensor> {
+        match name {
+            "weight" => Some(&self.weight),
+            "bias" => self.bias.as_ref(),
+            _ => None,
+        }
+    }
+
+    fn param_mut(&mut self, name: &str) -> Option<&mut GraphTensor> {
+        match name {
+            "weight" => Some(&mut self.weight),
+            "bias" => self.bias.as_mut(),
+            _ => None,
+        }
+    }
 }
 
 impl Linear {

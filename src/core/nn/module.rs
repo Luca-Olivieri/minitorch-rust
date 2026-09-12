@@ -84,6 +84,28 @@ pub trait Module {
             None => self.module_mut(path),
         }
     }
+
+    fn param(&self, _name: &str) -> Option<&GraphTensor> {
+        None
+    }
+
+    fn param_mut(&mut self, _name: &str) -> Option<&mut GraphTensor> {
+        None
+    }
+
+    fn param_path(&self, path: &str) -> Option<&GraphTensor> {
+        match path.split_once('.') {
+            Some((head, rest)) => self.module(head)?.param_path(rest),
+            None => self.param(path),
+        }
+    }
+
+    fn param_path_mut(&mut self, path: &str) -> Option<&mut GraphTensor> {
+        match path.split_once('.') {
+            Some((head, rest)) => self.module_mut(head)?.param_path_mut(rest),
+            None => self.param_mut(path),
+        }
+    }
 }
 
 fn join_path(parent: &str, name: &str) -> String {
