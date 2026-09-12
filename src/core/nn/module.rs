@@ -57,6 +57,33 @@ pub trait Module {
     fn for_each_own_module(&self, _f: &mut dyn FnMut(&str, &dyn Module)) {}
 
     fn for_each_own_module_mut(&mut self, _f: &mut dyn FnMut(&str, &mut dyn Module)) {}
+
+    // Dynamic lookup of directly-registered submodules by name. Overridden by
+    // macro-generated container impls; leaf modules have no submodules.
+
+    fn module(&self, _name: &str) -> Option<&dyn Module> {
+        None
+    }
+
+    fn module_mut(&mut self, _name: &str) -> Option<&mut dyn Module> {
+        None
+    }
+
+    // Dotted-path lookup across nested containers, e.g. "encoder.block.0".
+
+    fn module_path(&self, path: &str) -> Option<&dyn Module> {
+        match path.split_once('.') {
+            Some((head, rest)) => self.module(head)?.module_path(rest),
+            None => self.module(path),
+        }
+    }
+
+    fn module_path_mut(&mut self, path: &str) -> Option<&mut dyn Module> {
+        match path.split_once('.') {
+            Some((head, rest)) => self.module_mut(head)?.module_path_mut(rest),
+            None => self.module_mut(path),
+        }
+    }
 }
 
 fn join_path(parent: &str, name: &str) -> String {

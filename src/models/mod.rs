@@ -7,32 +7,31 @@ use crate::{
             activate::ReLU,
             compute::Linear,
             loss::Loss,
-            module::{Forward1, Module},
+            module::Forward1,
         },
         tensor::AbstractTensor,
     },
     data::dataloader::DataLoader,
 };
 
-pub struct XORClassifier {
-    pub lin1: Linear,
-    pub relu: ReLU,
-    pub lin2: Linear,
-    pub lin3: Linear,
+use crate::modules;
+
+modules! {
+    XORClassifier {
+        lin1: Linear,
+        relu: ReLU,
+        lin2: Linear,
+        lin3: Linear,
+    }
 }
 
 impl XORClassifier {
     pub fn new(mut rng: StdRng) -> Self {
-        let lin1 = Linear::new(2, 100, true, StdRng::from_rng(&mut rng)); // TODO how to clone an rng properly
-        let relu = ReLU::new();
-        let lin2 = Linear::new(100, 100, true, StdRng::from_rng(&mut rng));
-        let lin3 = Linear::new(100, 2, true, StdRng::from_rng(&mut rng));
-
         Self {
-            lin1,
-            relu,
-            lin2,
-            lin3,
+            lin1: Linear::new(2, 100, true, StdRng::from_rng(&mut rng)),
+            relu: ReLU::new(),
+            lin2: Linear::new(100, 100, true, StdRng::from_rng(&mut rng)),
+            lin3: Linear::new(100, 2, true, StdRng::from_rng(&mut rng)),
         }
     }
 }
@@ -47,41 +46,22 @@ impl Forward1 for XORClassifier {
     }
 }
 
-impl Module for XORClassifier {
-    fn for_each_own_module(&self, f: &mut dyn FnMut(&str, &dyn Module)) {
-        f("linear_1", &self.lin1);
-        f("relu", &self.relu);
-        f("linear_2", &self.lin2);
-        f("linear_3", &self.lin3);
+modules! {
+    CovertypeClassifier {
+        lin1: Linear,
+        relu: ReLU,
+        lin2: Linear,
+        lin3: Linear,
     }
-
-    fn for_each_own_module_mut(&mut self, f: &mut dyn FnMut(&str, &mut dyn Module)) {
-        f("linear_1", &mut self.lin1);
-        f("relu", &mut self.relu);
-        f("linear_2", &mut self.lin2);
-        f("linear_3", &mut self.lin3);
-    }
-}
-
-pub struct CovertypeClassifier {
-    pub lin1: Linear,
-    pub relu: ReLU,
-    pub lin2: Linear,
-    pub lin3: Linear,
 }
 
 impl CovertypeClassifier {
     pub fn new(mut rng: StdRng) -> Self {
-        let lin1 = Linear::new(54, 100, true, StdRng::from_rng(&mut rng)); // TODO how to clone an rng properly
-        let relu = ReLU::new();
-        let lin2 = Linear::new(100, 100, true, StdRng::from_rng(&mut rng));
-        let lin3 = Linear::new(100, 7, true, StdRng::from_rng(&mut rng));
-
         Self {
-            lin1,
-            relu,
-            lin2,
-            lin3,
+            lin1: Linear::new(54, 100, true, StdRng::from_rng(&mut rng)),
+            relu: ReLU::new(),
+            lin2: Linear::new(100, 100, true, StdRng::from_rng(&mut rng)),
+            lin3: Linear::new(100, 7, true, StdRng::from_rng(&mut rng)),
         }
     }
 
@@ -116,21 +96,5 @@ impl Forward1 for CovertypeClassifier {
         let y3 = self.lin2.forward(&y2);
         let y4 = self.relu.forward(&y3);
         self.lin3.forward(&y4) // logits
-    }
-}
-
-impl Module for CovertypeClassifier {
-    fn for_each_own_module(&self, f: &mut dyn FnMut(&str, &dyn Module)) {
-        f("linear_1", &self.lin1);
-        f("relu", &self.relu);
-        f("linear_2", &self.lin2);
-        f("linear_3", &self.lin3);
-    }
-
-    fn for_each_own_module_mut(&mut self, f: &mut dyn FnMut(&str, &mut dyn Module)) {
-        f("linear_1", &mut self.lin1);
-        f("relu", &mut self.relu);
-        f("linear_2", &mut self.lin2);
-        f("linear_3", &mut self.lin3);
     }
 }
