@@ -3,12 +3,12 @@ use minitorch_rust::core::nn::compute::Linear;
 use minitorch_rust::core::nn::module::Module;
 use minitorch_rust::core::tensor::AbstractTensor;
 use minitorch_rust::models::XORClassifier;
-use minitorch_rust::modules;
+use minitorch_rust::module;
 
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 
-modules! {
+module! {
     TestModel {
         modules {
             lin: Linear,

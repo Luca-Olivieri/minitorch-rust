@@ -1,14 +1,17 @@
 #[macro_export]
-macro_rules! modules {
+macro_rules! module {
+    // ── main arm (all three sections present) ──────────────────────────────
     (
         $model:ident {
             modules { $($mod_field:ident : $mod_ty:ty),* $(,)? },
-            params { $($param_field:ident),* $(,)? }
+            params { $($param_field:ident),* $(,)? },
+            optional_params { $($opt_field:ident),* $(,)? }
         }
     ) => {
         pub struct $model {
             $(pub $mod_field: $mod_ty,)*
             $(pub $param_field: $crate::core::GraphTensor,)*
+            $(pub $opt_field: Option<$crate::core::GraphTensor>,)*
         }
 
         impl $crate::core::nn::module::Module for $model {
@@ -17,6 +20,9 @@ macro_rules! modules {
                 _f: &mut dyn FnMut(&str, &$crate::core::GraphTensor),
             ) {
                 $(_f(stringify!($param_field), &self.$param_field);)*
+                $(if let Some(p) = &self.$opt_field {
+                    _f(stringify!($opt_field), p);
+                })*
             }
 
             fn for_each_own_param_mut(
@@ -24,6 +30,9 @@ macro_rules! modules {
                 _f: &mut dyn FnMut(&str, &mut $crate::core::GraphTensor),
             ) {
                 $(_f(stringify!($param_field), &mut self.$param_field);)*
+                $(if let Some(p) = &mut self.$opt_field {
+                    _f(stringify!($opt_field), p);
+                })*
             }
 
             fn for_each_own_module(
@@ -60,6 +69,7 @@ macro_rules! modules {
             fn param(&self, name: &str) -> Option<&$crate::core::GraphTensor> {
                 match name {
                     $(stringify!($param_field) => Some(&self.$param_field),)*
+                    $(stringify!($opt_field) => self.$opt_field.as_ref(),)*
                     _ => None,
                 }
             }
@@ -70,8 +80,56 @@ macro_rules! modules {
             ) -> Option<&mut $crate::core::GraphTensor> {
                 match name {
                     $(stringify!($param_field) => Some(&mut self.$param_field),)*
+                    $(stringify!($opt_field) => self.$opt_field.as_mut(),)*
                     _ => None,
                 }
+            }
+        }
+    };
+
+    // ── delegation arms (fill in missing sections) ────────────────────────
+
+    (
+        $model:ident {
+            modules { $($mod_field:ident : $mod_ty:ty),* $(,)? },
+            params { $($param_field:ident),* $(,)? }
+        }
+    ) => {
+        modules! {
+            $model {
+                modules { $($mod_field: $mod_ty),* },
+                params { $($param_field),* },
+                optional_params {}
+            }
+        }
+    };
+
+    (
+        $model:ident {
+            modules { $($mod_field:ident : $mod_ty:ty),* $(,)? },
+            optional_params { $($opt_field:ident),* $(,)? }
+        }
+    ) => {
+        modules! {
+            $model {
+                modules { $($mod_field: $mod_ty),* },
+                params {},
+                optional_params { $($opt_field),* }
+            }
+        }
+    };
+
+    (
+        $model:ident {
+            params { $($param_field:ident),* $(,)? },
+            optional_params { $($opt_field:ident),* $(,)? }
+        }
+    ) => {
+        modules! {
+            $model {
+                modules {},
+                params { $($param_field),* },
+                optional_params { $($opt_field),* }
             }
         }
     };
@@ -84,7 +142,8 @@ macro_rules! modules {
         modules! {
             $model {
                 modules { $($mod_field: $mod_ty),* },
-                params {}
+                params {},
+                optional_params {}
             }
         }
     };
@@ -97,7 +156,22 @@ macro_rules! modules {
         modules! {
             $model {
                 modules {},
-                params { $($param_field),* }
+                params { $($param_field),* },
+                optional_params {}
+            }
+        }
+    };
+
+    (
+        $model:ident {
+            optional_params { $($opt_field:ident),* $(,)? }
+        }
+    ) => {
+        modules! {
+            $model {
+                modules {},
+                params {},
+                optional_params { $($opt_field),* }
             }
         }
     };

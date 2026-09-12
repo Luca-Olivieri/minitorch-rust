@@ -1,12 +1,9 @@
-use crate::core::{
-    GraphTensor,
-    nn::module::{Forward1, Module},
-    tensor::AbstractTensor,
-};
+use crate::core::{GraphTensor, nn::module::Forward1, tensor::AbstractTensor};
+use crate::module;
 
-pub struct ReLU {}
-
-impl Module for ReLU {}
+module! {
+    ReLU {}
+}
 
 impl ReLU {
     pub fn new() -> Self {
@@ -28,15 +25,15 @@ impl Forward1 for ReLU {
     }
 }
 
-pub struct LogSoftmax {}
+module! {
+    LogSoftmax {}
+}
 
 impl Default for LogSoftmax {
     fn default() -> Self {
         Self::new()
     }
 }
-
-impl Module for LogSoftmax {}
 
 impl LogSoftmax {
     pub fn new() -> Self {
@@ -60,15 +57,15 @@ impl Forward1 for LogSoftmax {
     }
 }
 
-pub struct Softmax {}
+module! {
+    Softmax {}
+}
 
 impl Default for Softmax {
     fn default() -> Self {
         Self::new()
     }
 }
-
-impl Module for Softmax {}
 
 impl Softmax {
     pub fn new() -> Self {

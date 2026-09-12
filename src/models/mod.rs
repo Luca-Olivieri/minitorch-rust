@@ -9,9 +9,9 @@ use crate::{
     data::dataloader::DataLoader,
 };
 
-use crate::modules;
+use crate::module;
 
-modules! {
+module! {
     XORClassifier {
         modules {
             lin1: Linear,
@@ -43,7 +43,7 @@ impl Forward1 for XORClassifier {
     }
 }
 
-modules! {
+module! {
     CovertypeClassifier {
         modules {
             lin1: Linear,
