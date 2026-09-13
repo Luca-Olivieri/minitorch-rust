@@ -2,8 +2,8 @@ use minitorch_rust::core::GraphTensor;
 use minitorch_rust::core::nn::compute::Linear;
 use minitorch_rust::core::nn::module::{Forward1, Module};
 use minitorch_rust::core::tensor::AbstractTensor;
-use minitorch_rust::models::XORClassifier;
 use minitorch_rust::module;
+use crate::xor::XORClassifier;
 
 use rand::SeedableRng;
 use rand::rngs::StdRng;

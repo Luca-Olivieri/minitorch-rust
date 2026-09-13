@@ -2,6 +2,7 @@ mod indexing;
 pub mod init;
 pub mod ops;
 
+use std::fmt;
 use std::rc::Rc;
 
 use crate::core::autograd::grad_fn::GradFnTrait;
@@ -9,8 +10,6 @@ use crate::core::autograd::ops::shape::{BackwardCopyD, CopyDOp};
 use crate::core::node::TensorNode;
 use crate::core::storage::TensorStorage;
 use crate::core::tensor::ops::math::apply_tensor_op;
-
-// TODO define a custom, human-readable display and dbg method for GraphTensor and FreeTensor
 
 /// Accessors shared by every tensor flavor (`GraphTensor`, `FreeTensor`).
 ///
@@ -54,6 +53,77 @@ pub trait AbstractTensor {
     /// (e.g. freezing a module's parameters): once a tensor has been captured into
     /// a graph, rebinding it would orphan the gradients that graph computes for it.
     fn is_unique_ref(&self) -> bool;
+
+    /// Render this tensor in a PyTorch-style, human-readable format, mirroring
+    /// `TensorStorage`'s display. `label` names the concrete tensor flavor
+    /// (`FreeTensor`, `GraphTensor`) on the opening line.
+    fn fmt_tensor(&self, f: &mut fmt::Formatter<'_>, label: &str) -> fmt::Result {
+        let continuation_indent = " ".repeat(label.len() + 1);
+        writeln!(f, "{label}(shape={:?}, dtype=float,", self.shape())?;
+        writeln!(f, "{continuation_indent}numel={},", self.numel())?;
+        write!(f, "{continuation_indent}data=")?;
+
+        if self.shape().is_empty() {
+            write!(f, "{:.4}", self.at(&[]))?;
+        } else {
+            let mut curr_md_idx: Vec<usize> = Vec::new();
+            print_tensor_recursive(
+                self,
+                f,
+                0,
+                &mut curr_md_idx,
+                continuation_indent.len() + "data=".len(),
+            )?;
+        }
+
+        write!(f, ")")
+    }
+}
+
+fn print_tensor_recursive<T: AbstractTensor + ?Sized>(
+    t: &T,
+    f: &mut fmt::Formatter<'_>,
+    dim_index: usize,
+    curr_md_idx: &mut Vec<usize>,
+    indent: usize,
+) -> fmt::Result {
+    let shape = t.shape();
+    let dim_size = shape[dim_index];
+
+    if dim_index == shape.len() - 1 {
+        write!(f, "[")?;
+        for i in 0..dim_size {
+            curr_md_idx.push(i);
+            let val = *t.at(curr_md_idx);
+            curr_md_idx.pop();
+
+            write!(f, "{:.4}", val)?;
+            if i < dim_size - 1 {
+                write!(f, ", ")?;
+            }
+        }
+        write!(f, "]")?;
+    } else {
+        write!(f, "[")?;
+        for i in 0..dim_size {
+            if i > 0 {
+                write!(f, ",")?;
+                let newlines = shape.len() - dim_index - 1;
+                for _ in 0..newlines {
+                    writeln!(f)?;
+                }
+                for _ in 0..(indent + 1) {
+                    write!(f, " ")?;
+                }
+            }
+            curr_md_idx.push(i);
+            print_tensor_recursive(t, f, dim_index + 1, curr_md_idx, indent + 1)?;
+            curr_md_idx.pop();
+        }
+        write!(f, "]")?;
+    }
+
+    Ok(())
 }
 
 /// Crate-internal access to the computation-graph node. Not public: `TensorNode`
@@ -64,9 +134,7 @@ pub(crate) trait TensorNodeAccess: AbstractTensor {
     fn get_node_mut(&mut self) -> &mut TensorNode;
 }
 
-#[derive(Debug)]
 pub struct FreeTensor {
-    // TODO find a definitive name
     node: Box<TensorNode>,
 }
 
@@ -136,7 +204,18 @@ impl FreeTensor {
     }
 }
 
-#[derive(Debug)]
+impl fmt::Display for FreeTensor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        AbstractTensor::fmt_tensor(self, f, "FreeTensor")
+    }
+}
+
+impl fmt::Debug for FreeTensor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+
 pub struct GraphTensor {
     pub(super) node: Rc<TensorNode>,
 }
@@ -275,6 +354,18 @@ impl TensorNodeAccess for GraphTensor {
     fn get_node_mut(&mut self) -> &mut TensorNode {
         Rc::get_mut(&mut self.node)
             .expect("Failed to obtain mutable reference of GraphTensor with shared ownership.")
+    }
+}
+
+impl fmt::Display for GraphTensor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        AbstractTensor::fmt_tensor(self, f, "GraphTensor")
+    }
+}
+
+impl fmt::Debug for GraphTensor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self, f)
     }
 }
 

@@ -1,5 +1,6 @@
 use std::time::Instant;
 
+use minitorch_rust::core::GraphTensor;
 use minitorch_rust::core::nn::loss::{CrossEntropyLoss, Loss};
 use minitorch_rust::core::nn::module::Forward1;
 use minitorch_rust::core::nn::optimizer::{Optimizer, SGD};
