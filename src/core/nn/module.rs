@@ -38,6 +38,9 @@ pub trait Module {
         });
     }
 
+    // TODO right now, the param is detached, bumping the RC of the buffer, then bringing it back since the old param si discarded
+    // is there a way (that makes sense) to express this with move semantics?
+
     fn set_requires_grad(&mut self, requires_grad: bool, recursive: bool) {
         // Params are immutable GraphTensors, so "changing" the flag rebinds the
         // slot to a fresh detached leaf rather than mutating the shared node.

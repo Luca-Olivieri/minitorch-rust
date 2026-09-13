@@ -7,7 +7,9 @@ use minitorch_rust::core::nn::smoothing::SimpleExpSmoothing;
 use minitorch_rust::core::tensor::AbstractTensor;
 use minitorch_rust::data::dataloader::DataLoader;
 use minitorch_rust::data::dataset::CovertypeDataset;
-use minitorch_rust::models::CovertypeClassifier;
+use minitorch_rust::core::nn::activate::{ReLU};
+use minitorch_rust::core::nn::compute::Linear;
+use minitorch_rust::module;
 
 use rand::SeedableRng;
 use rand::rngs::StdRng;
@@ -120,5 +122,58 @@ fn main() {
         }
 
         epoch_loss_smoother.reset();
+    }
+}
+
+module! {
+    CovertypeClassifier {
+        modules {
+            lin1: Linear,
+            relu: ReLU,
+            lin2: Linear,
+            lin3: Linear,
+        }
+    }
+}
+
+impl CovertypeClassifier {
+    pub fn new(mut rng: StdRng) -> Self {
+        Self {
+            lin1: Linear::new(54, 100, true, StdRng::from_rng(&mut rng)),
+            relu: ReLU::new(),
+            lin2: Linear::new(100, 100, true, StdRng::from_rng(&mut rng)),
+            lin3: Linear::new(100, 7, true, StdRng::from_rng(&mut rng)),
+        }
+    }
+
+    pub fn evaluate(&self, dl: &mut DataLoader, criterion: &dyn Loss) -> GraphTensor {
+        let mut curr_loss = 0.0;
+        let mut curr_sample_count = 0;
+
+        for step in 0..dl.size() {
+            let (inputs, gts) = dl.get_batch(step);
+
+            let prs_oh = self.forward(&inputs);
+
+            let gts_oh = gts.one_hot(prs_oh.shape()[1]);
+
+            let loss = criterion.forward(&prs_oh, &gts_oh);
+
+            curr_loss += loss.item() * (inputs.shape()[0] as f64);
+            curr_sample_count += inputs.shape()[0];
+        }
+
+        let total_loss = curr_loss / (curr_sample_count as f64);
+        GraphTensor::wrap(total_loss, false)
+    }
+}
+
+impl Forward1 for CovertypeClassifier {
+    fn forward(&self, input: &GraphTensor) -> GraphTensor {
+        let y1 = self.lin1.forward(input);
+        let y2 = self.relu.forward(&y1);
+        let y3 = self.lin2.forward(&y2);
+        let y4 = self.relu.forward(&y3);
+        self.lin3.forward(&y4) // logits
     }
 }

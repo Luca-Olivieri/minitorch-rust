@@ -1,12 +1,13 @@
 use std::time::Instant;
 
 use minitorch_rust::core::GraphTensor;
-use minitorch_rust::core::nn::activate::Softmax;
+use minitorch_rust::core::nn::activate::{Softmax, ReLU};
 use minitorch_rust::core::nn::loss::{CrossEntropyLoss, Loss};
+use minitorch_rust::core::nn::compute::Linear;
 use minitorch_rust::core::nn::module::Forward1;
 use minitorch_rust::core::nn::optimizer::{Optimizer, SGD};
 use minitorch_rust::core::tensor::{AbstractTensor, FreeTensor};
-use minitorch_rust::models::XORClassifier;
+use minitorch_rust::module;
 
 use rand::SeedableRng;
 use rand::rngs::StdRng;
@@ -79,5 +80,37 @@ fn main() {
                 grads_map.len()
             );
         }
+    }
+}
+
+module! {
+    XORClassifier {
+        modules {
+            lin1: Linear,
+            relu: ReLU,
+            lin2: Linear,
+            lin3: Linear,
+        }
+    }
+}
+
+impl XORClassifier {
+    pub fn new(mut rng: StdRng) -> Self {
+        Self {
+            lin1: Linear::new(2, 100, true, StdRng::from_rng(&mut rng)),
+            relu: ReLU::new(),
+            lin2: Linear::new(100, 100, true, StdRng::from_rng(&mut rng)),
+            lin3: Linear::new(100, 2, true, StdRng::from_rng(&mut rng)),
+        }
+    }
+}
+
+impl Forward1 for XORClassifier {
+    fn forward(&self, input: &GraphTensor) -> GraphTensor {
+        let y1 = self.lin1.forward(input);
+        let y2 = self.relu.forward(&y1);
+        let y3 = self.lin2.forward(&y2);
+        let y4 = self.relu.forward(&y3);
+        self.lin3.forward(&y4) // logits
     }
 }
