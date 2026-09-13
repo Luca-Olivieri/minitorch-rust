@@ -58,6 +58,27 @@ impl GradRule<1> for ExpOp {
 }
 
 #[derive(Debug)]
+pub struct SqrtOp;
+pub type BackwardSqrt = NBackwardOp<SqrtOp, 1>;
+impl GradRule<1> for SqrtOp {
+    fn compute_grad(
+        &self,
+        operands: &[GraphTensor; 1],
+        in_grad: &GraphTensor,
+        _retain_graph: bool,
+        out: &mut Vec<Option<GraphTensor>>,
+    ) {
+        // y = sqrt(a)
+        // dy/da = 1 / (2 * sqrt(a)) = 1 / (2 * y)
+        let a = &operands[0];
+
+        out.push(a.requires_grad().then(|| {
+            in_grad / &(&a.sqrt() * 2.0)
+        }));
+    }
+}
+
+#[derive(Debug)]
 pub struct MatmulOp;
 pub type BackwardMatmul = NBackwardOp<MatmulOp, 2>;
 

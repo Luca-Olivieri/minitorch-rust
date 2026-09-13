@@ -87,7 +87,7 @@ fn xor_training_reduces_loss_and_tracks_recorded_trajectory() {
 
         if (epoch - 1) % 20 == 0 {
             let prs = softmax.forward(&logits);
-            recorded.push((epoch, loss.item(), GraphTensor::dist(&prs, &oh)));
+            recorded.push((epoch, loss.item(), GraphTensor::dist(&prs, &oh).item()));
         }
     }
 

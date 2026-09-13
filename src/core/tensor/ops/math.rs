@@ -4,8 +4,8 @@ use std::rc::Rc;
 use crate::core::autograd::grad_fn::GradFnTrait;
 use crate::core::autograd::ops::math::{
     AddOp, BackwardAdd, BackwardDiv, BackwardExp, BackwardLn, BackwardMaximum, BackwardMul,
-    BackwardNeg, BackwardPow, BackwardSub, DivOp, ExpOp, LnOp, MaximumOp, MulOp, NegOp, PowOp,
-    SubOp,
+    BackwardNeg, BackwardPow, BackwardSqrt, BackwardSub, DivOp, ExpOp, LnOp, MaximumOp, MulOp,
+    NegOp, PowOp, SqrtOp, SubOp,
 };
 use crate::core::node::TensorNode;
 use crate::core::storage::TensorStorage;
@@ -15,13 +15,14 @@ use crate::core::tensor::extract_requires_grad;
 impl GraphTensor {
     impl_tensor_unary_op!(ln, TensorStorage::ln, BackwardLn, LnOp);
     impl_tensor_unary_op!(exp, TensorStorage::exp, BackwardExp, ExpOp);
+    impl_tensor_unary_op!(sqrt, TensorStorage::sqrt, BackwardSqrt, SqrtOp);
     impl_tensor_binary_op!(pow, TensorStorage::pow, BackwardPow, PowOp);
     impl_tensor_binary_op!(maximum, TensorStorage::maximum, BackwardMaximum, MaximumOp);
 
-    pub fn norm(&self) -> f64 {
-        (self * self).sum(&[], false).item().sqrt()
+    pub fn norm(&self) -> GraphTensor {
+        (self * self).sum(&[], false).sqrt()
     }
-    pub fn dist(a: &GraphTensor, b: &GraphTensor) -> f64 {
+    pub fn dist(a: &GraphTensor, b: &GraphTensor) -> GraphTensor {
         (a - b).norm()
     }
 

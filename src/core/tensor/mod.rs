@@ -4,8 +4,11 @@ pub mod ops;
 
 use std::rc::Rc;
 
+use crate::core::autograd::grad_fn::GradFnTrait;
+use crate::core::autograd::ops::shape::{BackwardCopyD, CopyDOp};
 use crate::core::node::TensorNode;
 use crate::core::storage::TensorStorage;
+use crate::core::tensor::ops::math::apply_tensor_op;
 
 /// Accessors shared by every tensor flavor (`GraphTensor`, `FreeTensor`).
 ///
@@ -22,6 +25,23 @@ pub trait AbstractTensor {
     fn requires_grad(&self) -> bool;
 
     fn set_requires_grad(&mut self, requires_grad: bool);
+
+    /// Read the whole tensor as a single scalar. Panics unless the tensor has
+    /// exactly one element.
+    fn item(&self) -> f64 {
+        if self.numel() != 1 {
+            panic!(
+                "Cannot call item() on a non-singleton tensor (shape {:?}).",
+                self.shape()
+            );
+        }
+        *self.at(&vec![0; self.shape().len()])
+    }
+
+    /// New tensor backed by a deep copy of the data buffer. Graph-flavored
+    /// tensors keep the graph edge (gradient flows through); free tensors stay
+    /// disconnected from the graph.
+    fn copy_d(&self) -> Self;
 }
 
 /// Crate-internal access to the computation-graph node. Not public: `TensorNode`
@@ -57,6 +77,18 @@ impl AbstractTensor for FreeTensor {
 
     fn set_requires_grad(&mut self, requires_grad: bool) {
         self.node.requires_grad = requires_grad;
+    }
+
+    fn copy_d(&self) -> Self {
+        let node = TensorNode {
+            storage: TensorStorage::copy_d(&self.node.storage),
+            requires_grad: self.node.requires_grad,
+            grad_fn: None,
+        };
+
+        Self {
+            node: Box::new(node),
+        }
     }
 }
 
@@ -201,6 +233,19 @@ impl AbstractTensor for GraphTensor {
 
     fn set_requires_grad(&mut self, requires_grad: bool) {
         self.get_node_mut().requires_grad = requires_grad;
+    }
+
+    fn copy_d(&self) -> Self {
+        apply_tensor_op(
+            |ops: &[&TensorStorage; 1]| TensorStorage::copy_d(ops[0]),
+            Some(|operands: [GraphTensor; 1]| {
+                Box::new(BackwardCopyD {
+                    operands,
+                    op: CopyDOp {},
+                }) as Box<dyn GradFnTrait>
+            }),
+            &[self],
+        )
     }
 }
 

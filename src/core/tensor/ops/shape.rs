@@ -6,26 +6,13 @@ use crate::core::tensor::AbstractTensor;
 
 use crate::core::autograd::grad_fn::GradFnTrait;
 use crate::core::autograd::ops::shape::{
-    BackwardBroadcast, BackwardCopyD, BackwardExpand, BackwardSqueeze, BackwardTranspose,
-    BackwardUnsqueeze, BroadcastOp, CopyDOp, ExpandOp, SqueezeOp, TransposeOp, UnsqueezeOp,
+    BackwardBroadcast, BackwardExpand, BackwardSqueeze, BackwardTranspose,
+    BackwardUnsqueeze, BroadcastOp, ExpandOp, SqueezeOp, TransposeOp, UnsqueezeOp,
 };
 use crate::core::storage::TensorStorage;
 use crate::core::tensor::ops::math::apply_tensor_op;
 
 impl GraphTensor {
-    pub fn copy_d(&self) -> GraphTensor {
-        apply_tensor_op(
-            |ops: &[&TensorStorage; 1]| TensorStorage::copy_d(ops[0]),
-            Some(|operands: [GraphTensor; 1]| {
-                Box::new(BackwardCopyD {
-                    operands,
-                    op: CopyDOp {},
-                }) as Box<dyn GradFnTrait>
-            }),
-            &[self],
-        )
-    }
-
     pub fn unsqueeze(&self, dim: usize) -> GraphTensor {
         apply_tensor_op(
             |ops: &[&TensorStorage; 1]| TensorStorage::unsqueeze(ops[0], dim),
