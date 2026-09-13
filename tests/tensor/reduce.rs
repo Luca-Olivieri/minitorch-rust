@@ -181,8 +181,7 @@ fn argmax_keepdim_keeps_axis() {
 
 #[test]
 fn sum_backward_broadcasts_grad_to_all_reduced_dims() {
-    let mut a = tensor();
-    a.set_requires_grad(true);
+    let a = tensor().detach(true);
     let out = a.sum(&[0, 2], false);
 
     let grads = out.backward(true);
@@ -199,8 +198,7 @@ fn sum_backward_broadcasts_grad_to_all_reduced_dims() {
 
 #[test]
 fn sum_backward_through_keepdim_broadcasts_to_input() {
-    let mut a = tensor();
-    a.set_requires_grad(true);
+    let a = tensor().detach(true);
     // keepdim output [1,2,1] broadcasts against a [2,2,3] multipliers tensor
     let out = &a.sum(&[0, 2], true)
         * &GraphTensor::wrap(
@@ -233,8 +231,7 @@ fn sum_backward_through_keepdim_broadcasts_to_input() {
 
 #[test]
 fn sum_empty_dims_backward_is_ones() {
-    let mut a = tensor();
-    a.set_requires_grad(true);
+    let a = tensor().detach(true);
     let out = a.sum(&[], false);
 
     let grads = out.backward(true);
@@ -251,8 +248,7 @@ fn sum_empty_dims_backward_is_ones() {
 
 #[test]
 fn max_backward_flows_only_to_maxima() {
-    let mut a = tensor();
-    a.set_requires_grad(true);
+    let a = tensor().detach(true);
     let out = a.max(&[0, 2], false);
 
     let grads = out.backward(true);
@@ -275,8 +271,7 @@ fn max_backward_flows_only_to_maxima() {
 
 #[test]
 fn max_backward_through_keepdim_flows_only_to_maxima() {
-    let mut a = tensor();
-    a.set_requires_grad(true);
+    let a = tensor().detach(true);
     // same as max backward but the reduce keeps its axes ([1,2,1])
     let out = &a.max(&[0, 2], true)
         * &GraphTensor::wrap(

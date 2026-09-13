@@ -75,7 +75,7 @@ fn main() {
                 loss_time,
                 backward_time,
                 step_time,
-                GraphTensor::dist(&prs, &gts_oh),
+                GraphTensor::dist(&prs, &gts_oh).item(),
                 grads_map.len()
             );
         }

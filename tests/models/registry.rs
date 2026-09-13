@@ -1,6 +1,6 @@
 use minitorch_rust::core::GraphTensor;
 use minitorch_rust::core::nn::compute::Linear;
-use minitorch_rust::core::nn::module::Module;
+use minitorch_rust::core::nn::module::{Forward1, Module};
 use minitorch_rust::core::tensor::AbstractTensor;
 use minitorch_rust::models::XORClassifier;
 use minitorch_rust::module;
@@ -92,7 +92,8 @@ fn param_lookup_by_name_and_path() {
 fn param_mut_targets_only_the_requested_param() {
     let mut model = test_model();
 
-    model.param_mut("scale").unwrap().set_requires_grad(false);
+    let p = model.param_mut("scale").unwrap();
+    *p = p.detach(false);
 
     assert!(!model.scale.requires_grad());
     assert!(model.pos_embed.requires_grad());
@@ -118,4 +119,19 @@ fn recursive_param_enumeration_visits_own_and_child_params() {
             "scale".to_string(),
         ]
     );
+}
+
+#[test]
+fn set_requires_grad_before_forward_is_allowed() {
+    let mut model = XORClassifier::new(StdRng::seed_from_u64(42));
+    model.set_requires_grad(false, true);
+}
+
+#[test]
+#[should_panic(expected = "already been captured")]
+fn set_requires_grad_after_forward_panics() {
+    let mut model = XORClassifier::new(StdRng::seed_from_u64(42));
+    let input = GraphTensor::wrap(vec![0.0, 0.0], false);
+    let _logits = model.forward(&input);
+    model.set_requires_grad(false, true);
 }

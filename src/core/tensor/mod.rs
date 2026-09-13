@@ -10,6 +10,8 @@ use crate::core::node::TensorNode;
 use crate::core::storage::TensorStorage;
 use crate::core::tensor::ops::math::apply_tensor_op;
 
+// TODO define a custom, human-readable display and dbg method for GraphTensor and FreeTensor
+
 /// Accessors shared by every tensor flavor (`GraphTensor`, `FreeTensor`).
 ///
 /// This is the only dialect of tensor access that is exposed to library users:
@@ -23,8 +25,6 @@ pub trait AbstractTensor {
     fn numel(&self) -> usize;
 
     fn requires_grad(&self) -> bool;
-
-    fn set_requires_grad(&mut self, requires_grad: bool);
 
     /// Read the whole tensor as a single scalar. Panics unless the tensor has
     /// exactly one element.
@@ -42,6 +42,18 @@ pub trait AbstractTensor {
     /// tensors keep the graph edge (gradient flows through); free tensors stay
     /// disconnected from the graph.
     fn copy_d(&self) -> Self;
+
+    /// True when no other handle shares this tensor's underlying node.
+    ///
+    /// Every operation that consumes a `GraphTensor` snapshots it into the graph
+    /// (a clone of its node), so a graph tensor that has participated in any
+    /// operation is shared and reports `false`. A `FreeTensor` owns its node by
+    /// construction and is always solely referenced.
+    ///
+    /// This is the signal to use before state changes that rebind a tensor's node
+    /// (e.g. freezing a module's parameters): once a tensor has been captured into
+    /// a graph, rebinding it would orphan the gradients that graph computes for it.
+    fn is_unique_ref(&self) -> bool;
 }
 
 /// Crate-internal access to the computation-graph node. Not public: `TensorNode`
@@ -75,10 +87,6 @@ impl AbstractTensor for FreeTensor {
         self.node.requires_grad
     }
 
-    fn set_requires_grad(&mut self, requires_grad: bool) {
-        self.node.requires_grad = requires_grad;
-    }
-
     fn copy_d(&self) -> Self {
         let node = TensorNode {
             storage: TensorStorage::copy_d(&self.node.storage),
@@ -89,6 +97,10 @@ impl AbstractTensor for FreeTensor {
         Self {
             node: Box::new(node),
         }
+    }
+
+    fn is_unique_ref(&self) -> bool {
+        true
     }
 }
 
@@ -109,6 +121,12 @@ impl FreeTensor {
         Self {
             node: Box::new(node),
         }
+    }
+
+    /// Set the autograd flag in place. Only safe on the owned, uniquely held
+    /// `FreeTensor`; `GraphTensor` nodes are immutable once shared in a graph.
+    pub fn set_requires_grad(&mut self, requires_grad: bool) {
+        self.node.requires_grad = requires_grad;
     }
 
     pub fn to_graph(self) -> GraphTensor {
@@ -231,10 +249,6 @@ impl AbstractTensor for GraphTensor {
         self.node.requires_grad
     }
 
-    fn set_requires_grad(&mut self, requires_grad: bool) {
-        self.get_node_mut().requires_grad = requires_grad;
-    }
-
     fn copy_d(&self) -> Self {
         apply_tensor_op(
             |ops: &[&TensorStorage; 1]| TensorStorage::copy_d(ops[0]),
@@ -246,6 +260,10 @@ impl AbstractTensor for GraphTensor {
             }),
             &[self],
         )
+    }
+
+    fn is_unique_ref(&self) -> bool {
+        Rc::strong_count(&self.node) == 1
     }
 }
 

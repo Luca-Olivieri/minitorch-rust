@@ -1,4 +1,5 @@
-use crate::core::{GraphTensor, tensor::AbstractTensor};
+use crate::core::GraphTensor;
+use crate::core::tensor::AbstractTensor;
 
 pub trait Module {
     fn for_each_param(&self, f: &mut dyn FnMut(&str, &GraphTensor)) {
@@ -38,12 +39,42 @@ pub trait Module {
     }
 
     fn set_requires_grad(&mut self, requires_grad: bool, recursive: bool) {
+        // Params are immutable GraphTensors, so "changing" the flag rebinds the
+        // slot to a fresh detached leaf rather than mutating the shared node.
+        // This rebind changes node identity, orphaning any graph already built on
+        // the old node, so it is only permitted on a module that no operation has
+        // touched yet.
+        self.assert_not_captured(recursive);
+
         if recursive {
-            self.for_each_param_mut(&mut |_, param| param.set_requires_grad(requires_grad));
+            self.for_each_param_mut(&mut |_, param| *param = param.detach(requires_grad));
         } else {
-            self.for_each_own_param_mut(&mut |_, param| {
-                param.set_requires_grad(requires_grad);
-            });
+            self.for_each_own_param_mut(&mut |_, param| *param = param.detach(requires_grad));
+        }
+    }
+
+    /// Business rule: a module's params may be (re)frozen only while none of
+    /// them has been captured into a graph. The first op that uses a param
+    /// snapshots it via `copy_s`, so "captured" is exactly "the module is no
+    /// longer the sole reference" to the param's node.
+    fn assert_not_captured(&self, recursive: bool) {
+        let check = &mut |name: &str, param: &GraphTensor| {
+            // TODO: It's a runtime/panic rule, not compile-time. If you want misuses impossible at compile time,
+            // the alternative is a type-state split — e.g. XORClassifier in a "configurable" state exposing set_requires_grad,
+            // plus a consuming .activate()/.build() that returns the ready wrapper which alone implements Forward1.
+            // Stronger, but a bigger refactor across the module! macro, Forward1, and Optimizer::step(&mut dyn Module) plumbing.
+            assert!(
+                param.is_unique_ref(),
+                "Module::set_requires_grad: param `{name}` has already been captured in a \
+                 computation graph. Freeze parameters before building the graph (e.g. before \
+                 the first `forward`)."
+            );
+        };
+
+        if recursive {
+            self.for_each_param(check);
+        } else {
+            self.for_each_own_param(check);
         }
     }
 

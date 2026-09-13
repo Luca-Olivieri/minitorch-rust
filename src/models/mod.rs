@@ -69,9 +69,7 @@ impl CovertypeClassifier {
         let mut curr_sample_count = 0;
 
         for step in 0..dl.size() {
-            let (mut inputs, mut gts) = dl.get_batch(step);
-            inputs.set_requires_grad(false);
-            gts.set_requires_grad(false);
+            let (inputs, gts) = dl.get_batch(step);
 
             let prs_oh = self.forward(&inputs);
 
