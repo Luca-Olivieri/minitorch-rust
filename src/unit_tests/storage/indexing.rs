@@ -5,12 +5,12 @@ use crate::core::storage::TensorStorage;
 
 // The `apply_op` strided path before `StridedIter` existed: per-element
 // `operands[j][i]`, i.e. a `logic_to_flat` div/mod decomposition on every
-// access. That path is still live behind `Index<usize>`, so `old_mul` exercises
+// access. That path is still live behind `at_flat`, so `old_mul` exercises
 // the real old code.
 fn old_mul(a: &TensorStorage, b: &TensorStorage) -> TensorStorage {
     let mut out = Vec::with_capacity(a.numel);
     for i in 0..a.numel {
-        out.push(a[i] * b[i]);
+        out.push(a.at_logic(i) * b.at_logic(i));
     }
     TensorStorage::from_buffer(a.shape.clone(), out)
 }
@@ -54,7 +54,7 @@ fn strided_indices_yields_logic_to_flat_order() {
 
     // [2,3]^T fills column-major: [[1,4],[2,5],[3,6]] => flat [1,4,2,5,3,6]
     let by_odometer: Vec<f64> = t.strided_indices().map(|f| t.buffer[f]).collect();
-    let by_logic: Vec<f64> = (0..t.numel).map(|i| t[i]).collect();
+    let by_logic: Vec<f64> = (0..t.numel).map(|i| *t.at_logic(i)).collect();
     assert_eq!(by_odometer, &[1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
     assert_eq!(by_odometer, by_logic);
     assert_eq!(by_odometer.len(), 6);

@@ -140,7 +140,7 @@ pub struct FreeTensor {
 
 impl AbstractTensor for FreeTensor {
     fn at(&self, md_idx: &[usize]) -> &f64 {
-        &self.node.storage[md_idx]
+        self.node.storage.at(md_idx)
     }
 
     fn shape(&self) -> &Vec<usize> {
@@ -313,7 +313,7 @@ impl<T: IntoNestedStorage> IntoNestedStorage for Vec<T> {
 
 impl AbstractTensor for GraphTensor {
     fn at(&self, md_idx: &[usize]) -> &f64 {
-        &self.node.storage[md_idx]
+        self.node.storage.at(md_idx)
     }
 
     fn shape(&self) -> &Vec<usize> {

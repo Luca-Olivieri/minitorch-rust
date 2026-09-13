@@ -40,7 +40,7 @@ impl TensorStorage {
             write!(f, "[")?;
             for i in 0..dim_size {
                 curr_md_idx.push(i);
-                let val = self[self.md_to_flat(curr_md_idx)];
+                let val = *self.at(curr_md_idx);
                 curr_md_idx.pop();
 
                 write!(f, "{:.4}", val)?;

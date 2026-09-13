@@ -1,8 +1,5 @@
 use crate::core::storage::TensorStorage;
-use std::{
-    ops::{Index, IndexMut},
-    rc::Rc,
-};
+use std::rc::Rc;
 
 impl TensorStorage {
     /// Try to add `other`'s values into `self`'s buffer elementwise, in place.
@@ -63,6 +60,7 @@ impl TensorStorage {
         flat_index
     }
 
+    #[allow(dead_code)]
     fn logic_to_flat(&self, l_idx: usize) -> usize {
         if l_idx >= self.numel {
             panic!(
@@ -86,34 +84,30 @@ impl TensorStorage {
             offset
         }
     }
-}
 
-impl Index<&[usize]> for TensorStorage {
-    type Output = f64;
-
-    fn index(&self, md_idx: &[usize]) -> &f64 {
+    /// Multidimensional read: index by row-major coordinates.
+    pub(crate) fn at(&self, md_idx: &[usize]) -> &f64 {
         &self.buffer[self.md_to_flat(md_idx)]
     }
-}
 
-impl Index<usize> for TensorStorage {
-    type Output = f64;
-
-    fn index(&self, i: usize) -> &f64 {
-        &self.buffer[self.logic_to_flat(i)]
-    }
-}
-
-impl IndexMut<&[usize]> for TensorStorage {
-    fn index_mut(&mut self, md_idx: &[usize]) -> &mut f64 {
+    /// Multidimensional write: index by row-major coordinates.
+    pub(crate) fn set(&mut self, md_idx: &[usize], value: f64) {
         let f_idx = self.md_to_flat(md_idx);
-        &mut self.buffer_mut()[f_idx]
+        self.buffer_mut()[f_idx] = value;
     }
-}
 
-impl IndexMut<usize> for TensorStorage {
-    fn index_mut(&mut self, i: usize) -> &mut f64 {
-        let f_idx = self.logic_to_flat(i);
-        &mut self.buffer_mut()[f_idx]
+    /// Single-dimensional read: index by logical flat position (0..numel),
+    /// resolved through strides when the storage is a strided view.
+    #[allow(dead_code)]
+    pub(crate) fn at_logic(&self, l_idx: usize) -> &f64 {
+        &self.buffer[self.logic_to_flat(l_idx)]
+    }
+
+    /// Single-dimensional write: index by logical flat position (0..numel),
+    /// resolved through strides when the storage is a strided view.
+    #[allow(dead_code)]
+    pub(crate) fn set_logic(&mut self, l_idx: usize, value: f64) {
+        let f_idx = self.logic_to_flat(l_idx);
+        self.buffer_mut()[f_idx] = value;
     }
 }
