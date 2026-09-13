@@ -117,7 +117,7 @@ fn grad_a(a: &GraphTensor, b: &GraphTensor, in_grad: &GraphTensor) -> GraphTenso
 
     let g = GraphTensor::matmul(
         &grad_to_2d(a.shape().len(), b.shape().len(), in_grad),
-        &b2.transpose(),
+        &b2.transpose(0, 1),
     );
 
     if a_was_1d { g.squeeze(0) } else { g }
@@ -129,7 +129,7 @@ fn grad_b(a: &GraphTensor, b: &GraphTensor, in_grad: &GraphTensor) -> GraphTenso
     let (_, b_was_1d) = into_col(b);
 
     let g = GraphTensor::matmul(
-        &a2.transpose(),
+        &a2.transpose(0, 1),
         &grad_to_2d(a.shape().len(), b.shape().len(), in_grad),
     );
 

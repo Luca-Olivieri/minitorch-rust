@@ -65,7 +65,10 @@ impl GradRule<1> for SqueezeOp {
 }
 
 #[derive(Debug)]
-pub struct TransposeOp {}
+pub struct TransposeOp {
+    pub dim_a: usize,
+    pub dim_b: usize,
+}
 
 pub type BackwardTranspose = NBackwardOp<TransposeOp, 1>;
 
@@ -77,7 +80,12 @@ impl GradRule<1> for TransposeOp {
         _retain_graph: bool,
         out: &mut Vec<Option<GraphTensor>>,
     ) {
-        out.push(operands[0].requires_grad().then(|| in_grad.transpose()));
+        // transpose is its own inverse: transposing the same dims twice is a no-op
+        out.push(
+            operands[0]
+                .requires_grad()
+                .then(|| in_grad.transpose(self.dim_a, self.dim_b)),
+        );
     }
 }
 

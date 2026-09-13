@@ -53,7 +53,7 @@ fn bench_one(name: &str, a: &TensorStorage) {
 fn max_all_matches_reduce_dims() {
     let a = TensorStorage::from_buffer(vec![3, 4], (1..=12).map(|x| x as f64).collect());
     assert_eq!(TensorStorage::max_all(&a).buffer.as_ref()[0], 12.0);
-    let t = TensorStorage::transpose(&a);
+    let t = TensorStorage::transpose(&a, 0, 1);
     assert!(!t.contiguous);
     assert_eq!(TensorStorage::max_all(&t).buffer.as_ref()[0], 12.0);
 }
@@ -81,7 +81,7 @@ fn bench_max_all() {
 
     // strided view of an 8MB buffer (transpose): both paths use the odometer
     let c = TensorStorage::from_buffer(vec![1024, 1024], (0..M).map(|i| i as f64).collect());
-    let t = TensorStorage::transpose(&c);
+    let t = TensorStorage::transpose(&c, 0, 1);
     bench_one("strided [1024,1024]^T (8MB)", &t);
 }
 
@@ -89,7 +89,7 @@ fn bench_max_all() {
 fn sum_strided_view_empty_dims_means_all() {
     // 2x2 contiguous, then transposed into a [2,2] strided view.
     let a = TensorStorage::from_buffer(vec![2, 2], (1..=4).map(|x| x as f64).collect());
-    let t = TensorStorage::transpose(&a);
+    let t = TensorStorage::transpose(&a, 0, 1);
     assert!(!t.contiguous);
 
     let sum = TensorStorage::sum(&t, &[]);

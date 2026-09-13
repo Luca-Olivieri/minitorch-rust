@@ -52,22 +52,13 @@ impl GraphTensor {
         )
     }
 
-    // TODO make transpose over tensors of arbitrary shape, and select the two dims to swap
-
-    pub fn transpose(&self) -> GraphTensor {
-        if self.shape().len() != 2 {
-            panic!(
-                "transpose() requires a 2D tensor, got shape {:?}.",
-                self.shape()
-            );
-        }
-
+    pub fn transpose(&self, dim_a: usize, dim_b: usize) -> GraphTensor {
         apply_tensor_op(
-            |ops: &[&TensorStorage; 1]| TensorStorage::transpose(ops[0]),
+            |ops: &[&TensorStorage; 1]| TensorStorage::transpose(ops[0], dim_a, dim_b),
             Some(|operands: [GraphTensor; 1]| {
                 Box::new(BackwardTranspose {
                     operands,
-                    op: TransposeOp {},
+                    op: TransposeOp { dim_a, dim_b },
                 }) as Box<dyn GradFnTrait>
             }),
             &[self],

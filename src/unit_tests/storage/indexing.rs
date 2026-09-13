@@ -49,7 +49,7 @@ fn bench_one(name: &str, a: &TensorStorage, b: &TensorStorage) {
 #[test]
 fn strided_indices_yields_logic_to_flat_order() {
     let a = TensorStorage::from_buffer(vec![2, 3], (1..=6).map(|x| x as f64).collect());
-    let t = TensorStorage::transpose(&a); // [3,2] strided view
+    let t = TensorStorage::transpose(&a, 0, 1); // [3,2] strided view
     assert!(!t.contiguous);
 
     // [2,3]^T fills column-major: [[1,4],[2,5],[3,6]] => flat [1,4,2,5,3,6]
@@ -65,8 +65,8 @@ fn mul_matches_old_path_on_strided_views() {
     // transposed views: both operands strided
     let a = TensorStorage::from_buffer(vec![3, 4], (1..=12).map(|x| x as f64).collect());
     let b = TensorStorage::from_buffer(vec![4, 3], (1..=12).map(|x| x as f64).collect());
-    let ta = TensorStorage::transpose(&a); // [4,3]
-    let tb = TensorStorage::transpose(&b); // [3,4]
+    let ta = TensorStorage::transpose(&a, 0, 1); // [4,3]
+    let tb = TensorStorage::transpose(&b, 0, 1); // [3,4]
     assert_eq!(ta.shape, vec![4, 3]);
     assert_eq!(tb.shape, vec![3, 4]);
 
@@ -119,12 +119,12 @@ fn bench_strided_mul() {
 
     // 2D strided view of an 8MB buffer (transpose): [1024,1024]^T
     let c = TensorStorage::from_buffer(vec![1024, 1024], (0..M).map(|i| i as f64).collect());
-    let t2 = TensorStorage::transpose(&c);
+    let t2 = TensorStorage::transpose(&c, 0, 1);
     bench_one("strided [1024,1024]^T (8MB)", &t2, &t2);
 
     // transposed view: [256,4096]^T = [4096,256]
     let c3 = TensorStorage::from_buffer(vec![256, 4096], (0..M).map(|i| i as f64).collect());
-    let t3 = TensorStorage::transpose(&c3);
+    let t3 = TensorStorage::transpose(&c3, 0, 1);
     bench_one("strided [4096,256]^T (8MB)", &t3, &t3);
 
     // one strided, one contiguous operand (like a broadcasted binary op)

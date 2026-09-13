@@ -117,18 +117,31 @@ impl TensorStorage {
         }
     }
 
-    pub fn transpose(a: &TensorStorage) -> TensorStorage {
-        if a.shape.len() != 2 {
-            panic!("Transpose requires a 2D tensor, got shape {:?}.", a.shape);
+    pub fn transpose(a: &TensorStorage, dim_a: usize, dim_b: usize) -> TensorStorage {
+        if dim_a >= a.shape.len() || dim_b >= a.shape.len() {
+            panic!(
+                "Transposed dimensions {} and {} out of range for shape of length {:?}.",
+                dim_a,
+                dim_b,
+                a.shape.len()
+            );
         }
 
+        // transposing a dim with itself is a no-op
+        if dim_a == dim_b {
+            return Self::copy_s(a);
+        }
+
+        let mut out_shape = a.shape.clone();
+        out_shape.swap(dim_a, dim_b);
+
         let mut out_strides = a.strides.clone();
-        out_strides.swap(0, 1);
+        out_strides.swap(dim_a, dim_b);
 
         // make a view: share the underlying flat data and keep the same offset
         Self {
             buffer: Rc::clone(&a.buffer),
-            shape: vec![a.shape[1], a.shape[0]],
+            shape: out_shape,
             strides: out_strides,
             contiguous: false,
             numel: a.numel,
