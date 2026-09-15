@@ -4,12 +4,12 @@ pub mod init;
 pub mod iter;
 pub mod ops;
 
+use crate::core::dtype::Dtype;
 use std::rc::Rc;
 
-// TODO make the numbers generic (not tied to f64)
 #[derive(Debug)]
-pub(crate) struct TensorStorage {
-    pub(crate) buffer: Rc<Vec<f64>>,
+pub(crate) struct TensorStorage<T: Dtype = f64> {
+    pub(crate) buffer: Rc<Vec<T>>,
     pub(crate) shape: Vec<usize>,
     pub(crate) strides: Vec<usize>,
     pub(crate) contiguous: bool,
@@ -17,8 +17,8 @@ pub(crate) struct TensorStorage {
     pub(crate) offset: usize,
 }
 
-impl TensorStorage {
-    pub(crate) fn new(shape: Vec<usize>, fill_value: f64) -> Self {
+impl<T: Dtype> TensorStorage<T> {
+    pub(crate) fn new(shape: Vec<usize>, fill_value: T) -> Self {
         if !are_dims_positive(&shape) {
             panic!("Tensor shape must have positive dimensions. Got {shape:?}.")
         }
@@ -43,7 +43,7 @@ impl TensorStorage {
     /// once.
     pub(crate) fn from_fn<F>(shape: Vec<usize>, mut f: F) -> Self
     where
-        F: FnMut(usize) -> f64,
+        F: FnMut(usize) -> T,
     {
         if !are_dims_positive(&shape) {
             panic!("Tensor shape must have positive dimensions. Got {shape:?}.")
@@ -64,7 +64,7 @@ impl TensorStorage {
 
     /// Wrap an already-completely-initialized contiguous buffer into a storage.
     /// The resulting tensor is a contiguous, offset-0 view of `buffer`.
-    pub(crate) fn from_buffer(shape: Vec<usize>, buffer: Vec<f64>) -> Self {
+    pub(crate) fn from_buffer(shape: Vec<usize>, buffer: Vec<T>) -> Self {
         if !are_dims_positive(&shape) {
             panic!("Tensor shape must have positive dimensions. Got {shape:?}.")
         }
@@ -95,7 +95,7 @@ impl TensorStorage {
     /// Panics if the buffer is not uniquely owned (i.e. it is still shared with
     /// another view), since mutating it in place would corrupt sibling views.
     /// Freshly allocated storages and detached copies are always uniquely owned.
-    pub(crate) fn buffer_mut(&mut self) -> &mut Vec<f64> {
+    pub(crate) fn buffer_mut(&mut self) -> &mut Vec<T> {
         Rc::get_mut(&mut self.buffer)
             .expect("Cannot mutate a buffer that is still shared by multiple storage views.")
     }

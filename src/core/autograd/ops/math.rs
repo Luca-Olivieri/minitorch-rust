@@ -1,17 +1,33 @@
-use crate::core::autograd::grad_fn::*;
-use crate::core::tensor::{AbstractTensor, GraphTensor};
+use crate::core::{
+    GraphTensor,
+    autograd::grad_fn::*,
+    dtype::{Float, Numeric},
+    tensor::AbstractTensor,
+};
+
+// The grad-rule for each op lives in the same dtype home as the op itself:
+//
+// - Numeric-homed forward ops (add/mul/maximum/matmul) have Numeric-homed rules,
+//   so integer tensors carry the same graph structure even though a backward
+//   *run* only exists for floats.
+// - Float-homed forward ops (neg/ln/exp/sqrt/sub/div/pow) have Float-homed
+//   rules, because their backward math uses float-only ops.
+
+/// Build a scalar node of dtype `T` from a plain `f64` constant.
+fn scalar<T: Float>(x: f64) -> GraphTensor<T> {
+    GraphTensor::new(Vec::new(), T::from_f64(x), false)
+}
 
 #[derive(Debug)]
 pub struct NegOp;
-pub type BackwardNeg = NBackwardOp<NegOp, 1>;
 
-impl GradRule<1> for NegOp {
+impl<T: Float> GradRule<1, T> for NegOp {
     fn compute_grad(
         &self,
-        operands: &[GraphTensor; 1],
-        in_grad: &GraphTensor,
+        operands: &[GraphTensor<T>; 1],
+        in_grad: &GraphTensor<T>,
         _retain_graph: bool,
-        out: &mut Vec<Option<GraphTensor>>,
+        out: &mut Vec<Option<GraphTensor<T>>>,
     ) {
         out.push(operands[0].requires_grad().then(|| -in_grad));
     }
@@ -19,14 +35,14 @@ impl GradRule<1> for NegOp {
 
 #[derive(Debug)]
 pub struct LnOp;
-pub type BackwardLn = NBackwardOp<LnOp, 1>;
-impl GradRule<1> for LnOp {
+
+impl<T: Float> GradRule<1, T> for LnOp {
     fn compute_grad(
         &self,
-        operands: &[GraphTensor; 1],
-        in_grad: &GraphTensor,
+        operands: &[GraphTensor<T>; 1],
+        in_grad: &GraphTensor<T>,
         _retain_graph: bool,
-        out: &mut Vec<Option<GraphTensor>>,
+        out: &mut Vec<Option<GraphTensor<T>>>,
     ) {
         // y = ln(a)
         // dy/da = 1 / a
@@ -38,14 +54,14 @@ impl GradRule<1> for LnOp {
 
 #[derive(Debug)]
 pub struct ExpOp;
-pub type BackwardExp = NBackwardOp<ExpOp, 1>;
-impl GradRule<1> for ExpOp {
+
+impl<T: Float> GradRule<1, T> for ExpOp {
     fn compute_grad(
         &self,
-        operands: &[GraphTensor; 1],
-        in_grad: &GraphTensor,
+        operands: &[GraphTensor<T>; 1],
+        in_grad: &GraphTensor<T>,
         _retain_graph: bool,
-        out: &mut Vec<Option<GraphTensor>>,
+        out: &mut Vec<Option<GraphTensor<T>>>,
     ) {
         // y = exp(a) = e^a
         // dy/da = e^a = y
@@ -59,36 +75,34 @@ impl GradRule<1> for ExpOp {
 
 #[derive(Debug)]
 pub struct SqrtOp;
-pub type BackwardSqrt = NBackwardOp<SqrtOp, 1>;
-impl GradRule<1> for SqrtOp {
+
+impl<T: Float> GradRule<1, T> for SqrtOp {
     fn compute_grad(
         &self,
-        operands: &[GraphTensor; 1],
-        in_grad: &GraphTensor,
+        operands: &[GraphTensor<T>; 1],
+        in_grad: &GraphTensor<T>,
         _retain_graph: bool,
-        out: &mut Vec<Option<GraphTensor>>,
+        out: &mut Vec<Option<GraphTensor<T>>>,
     ) {
         // y = sqrt(a)
         // dy/da = 1 / (2 * sqrt(a)) = 1 / (2 * y)
         let a = &operands[0];
+        let two = scalar::<T>(2.0);
 
-        out.push(a.requires_grad().then(|| {
-            in_grad / &(&a.sqrt() * 2.0)
-        }));
+        out.push(a.requires_grad().then(|| in_grad / &(&a.sqrt() * &two)));
     }
 }
 
 #[derive(Debug)]
 pub struct MatmulOp;
-pub type BackwardMatmul = NBackwardOp<MatmulOp, 2>;
 
-impl GradRule<2> for MatmulOp {
+impl<T: Numeric> GradRule<2, T> for MatmulOp {
     fn compute_grad(
         &self,
-        operands: &[GraphTensor; 2],
-        in_grad: &GraphTensor,
+        operands: &[GraphTensor<T>; 2],
+        in_grad: &GraphTensor<T>,
         _retain_graph: bool,
-        out: &mut Vec<Option<GraphTensor>>,
+        out: &mut Vec<Option<GraphTensor<T>>>,
     ) {
         out.push(
             operands[0]
@@ -104,7 +118,7 @@ impl GradRule<2> for MatmulOp {
 }
 
 // Turn a 1D tensor [k] into a [1, k] "row" view.
-fn into_row(t: &GraphTensor) -> (GraphTensor, bool) {
+fn into_row<T: Numeric>(t: &GraphTensor<T>) -> (GraphTensor<T>, bool) {
     if t.shape().len() == 1 {
         (t.unsqueeze(0), true)
     } else {
@@ -113,7 +127,7 @@ fn into_row(t: &GraphTensor) -> (GraphTensor, bool) {
 }
 
 // Turn a 1D tensor [k] into a [k, 1] "column" view.
-fn into_col(t: &GraphTensor) -> (GraphTensor, bool) {
+fn into_col<T: Numeric>(t: &GraphTensor<T>) -> (GraphTensor<T>, bool) {
     if t.shape().len() == 1 {
         (t.unsqueeze(1), true)
     } else {
@@ -122,7 +136,7 @@ fn into_col(t: &GraphTensor) -> (GraphTensor, bool) {
 }
 
 // Reshape the upstream gradient to the 2D [m, n] shape the kernel expects.
-fn grad_to_2d(a_ndim: usize, b_ndim: usize, in_grad: &GraphTensor) -> GraphTensor {
+fn grad_to_2d<T: Numeric>(a_ndim: usize, b_ndim: usize, in_grad: &GraphTensor<T>) -> GraphTensor<T> {
     match (a_ndim, b_ndim) {
         (1, 1) => in_grad.unsqueeze(0).unsqueeze(1),
         (1, _) => in_grad.unsqueeze(0),
@@ -132,7 +146,7 @@ fn grad_to_2d(a_ndim: usize, b_ndim: usize, in_grad: &GraphTensor) -> GraphTenso
 }
 
 // dL/dA = in_grad @ B^T
-fn grad_a(a: &GraphTensor, b: &GraphTensor, in_grad: &GraphTensor) -> GraphTensor {
+fn grad_a<T: Numeric>(a: &GraphTensor<T>, b: &GraphTensor<T>, in_grad: &GraphTensor<T>) -> GraphTensor<T> {
     let (_, a_was_1d) = into_row(a);
     let (b2, _) = into_col(b);
 
@@ -145,7 +159,7 @@ fn grad_a(a: &GraphTensor, b: &GraphTensor, in_grad: &GraphTensor) -> GraphTenso
 }
 
 // dL/dB = A^T @ in_grad
-fn grad_b(a: &GraphTensor, b: &GraphTensor, in_grad: &GraphTensor) -> GraphTensor {
+fn grad_b<T: Numeric>(a: &GraphTensor<T>, b: &GraphTensor<T>, in_grad: &GraphTensor<T>) -> GraphTensor<T> {
     let (a2, _) = into_row(a);
     let (_, b_was_1d) = into_col(b);
 
@@ -159,15 +173,14 @@ fn grad_b(a: &GraphTensor, b: &GraphTensor, in_grad: &GraphTensor) -> GraphTenso
 
 #[derive(Debug)]
 pub struct AddOp;
-pub type BackwardAdd = NBackwardOp<AddOp, 2>;
 
-impl GradRule<2> for AddOp {
+impl<T: Numeric> GradRule<2, T> for AddOp {
     fn compute_grad(
         &self,
-        operands: &[GraphTensor; 2],
-        in_grad: &GraphTensor,
+        operands: &[GraphTensor<T>; 2],
+        in_grad: &GraphTensor<T>,
         retain_graph: bool,
-        out: &mut Vec<Option<GraphTensor>>,
+        out: &mut Vec<Option<GraphTensor<T>>>,
     ) {
         out.push(
             operands[0]
@@ -184,15 +197,14 @@ impl GradRule<2> for AddOp {
 
 #[derive(Debug)]
 pub struct SubOp;
-pub type BackwardSub = NBackwardOp<SubOp, 2>;
 
-impl GradRule<2> for SubOp {
+impl<T: Float> GradRule<2, T> for SubOp {
     fn compute_grad(
         &self,
-        operands: &[GraphTensor; 2],
-        in_grad: &GraphTensor,
+        operands: &[GraphTensor<T>; 2],
+        in_grad: &GraphTensor<T>,
         retain_graph: bool,
-        out: &mut Vec<Option<GraphTensor>>,
+        out: &mut Vec<Option<GraphTensor<T>>>,
     ) {
         out.push(
             operands[0]
@@ -209,15 +221,14 @@ impl GradRule<2> for SubOp {
 
 #[derive(Debug)]
 pub struct MulOp;
-pub type BackwardMul = NBackwardOp<MulOp, 2>;
 
-impl GradRule<2> for MulOp {
+impl<T: Numeric> GradRule<2, T> for MulOp {
     fn compute_grad(
         &self,
-        operands: &[GraphTensor; 2],
-        in_grad: &GraphTensor,
+        operands: &[GraphTensor<T>; 2],
+        in_grad: &GraphTensor<T>,
         retain_graph: bool,
-        out: &mut Vec<Option<GraphTensor>>,
+        out: &mut Vec<Option<GraphTensor<T>>>,
     ) {
         // d/dx0 (x0*x1) = in_grad * x1, d/dx1 = in_grad * x0
         out.push(operands[0].requires_grad().then(|| {
@@ -231,14 +242,14 @@ impl GradRule<2> for MulOp {
 
 #[derive(Debug)]
 pub struct DivOp;
-pub type BackwardDiv = NBackwardOp<DivOp, 2>;
-impl GradRule<2> for DivOp {
+
+impl<T: Float> GradRule<2, T> for DivOp {
     fn compute_grad(
         &self,
-        operands: &[GraphTensor; 2],
-        in_grad: &GraphTensor,
+        operands: &[GraphTensor<T>; 2],
+        in_grad: &GraphTensor<T>,
         retain_graph: bool,
-        out: &mut Vec<Option<GraphTensor>>,
+        out: &mut Vec<Option<GraphTensor<T>>>,
     ) {
         // y = a / b
         // dy/da = 1/b            -> grad_a = in_grad / b
@@ -256,23 +267,24 @@ impl GradRule<2> for DivOp {
 
 #[derive(Debug)]
 pub struct PowOp;
-pub type BackwardPow = NBackwardOp<PowOp, 2>;
-impl GradRule<2> for PowOp {
+
+impl<T: Float> GradRule<2, T> for PowOp {
     fn compute_grad(
         &self,
-        operands: &[GraphTensor; 2],
-        in_grad: &GraphTensor,
+        operands: &[GraphTensor<T>; 2],
+        in_grad: &GraphTensor<T>,
         retain_graph: bool,
-        out: &mut Vec<Option<GraphTensor>>,
+        out: &mut Vec<Option<GraphTensor<T>>>,
     ) {
         // y = b.powf(e)
         // dy/db = e * b^(e-1)
         // dy/de = b^e * ln(b)
         let base = &operands[0];
         let exp = &operands[1];
+        let one = scalar::<T>(1.0);
 
         out.push(base.requires_grad().then(|| {
-            let exp_minus_one = exp - 1.0;
+            let exp_minus_one = exp - &one;
             let rhs = &(in_grad * exp) * &base.pow(&exp_minus_one);
             reduce_grad_to_shape(&rhs, base.shape(), retain_graph)
         }));
@@ -289,18 +301,17 @@ impl GradRule<2> for PowOp {
 
 #[derive(Debug)]
 pub struct MaximumOp;
-pub type BackwardMaximum = NBackwardOp<MaximumOp, 2>;
-impl GradRule<2> for MaximumOp {
+
+impl<T: Numeric> GradRule<2, T> for MaximumOp {
     fn compute_grad(
         &self,
-        operands: &[GraphTensor; 2],
-        in_grad: &GraphTensor,
+        operands: &[GraphTensor<T>; 2],
+        in_grad: &GraphTensor<T>,
         retain_graph: bool,
-        out: &mut Vec<Option<GraphTensor>>,
+        out: &mut Vec<Option<GraphTensor<T>>>,
     ) {
-        // y = b.powf(e)
-        // dy/db = e * b^(e-1)
-        // dy/de = b^e * ln(b)
+        // y = max(a, b): gradient flows to whichever operand attained the max
+        //   dy/da = (a >= b), dy/db = (a < b)
         let a = &operands[0];
         let b = &operands[1];
 

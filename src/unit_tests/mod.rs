@@ -5,4 +5,7 @@
 //! library itself (`#[cfg(test)]`) rather than as integration tests. Integration
 //! tests live in `tests/` and only use the public API.
 
+mod dtype;
 mod storage;
+mod tensor_casts;
+mod tensor_generics;

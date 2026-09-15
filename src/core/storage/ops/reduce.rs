@@ -1,6 +1,7 @@
+use crate::core::dtype::{Dtype, Numeric};
 use crate::core::storage::TensorStorage;
 
-impl TensorStorage {
+impl<T: Numeric> TensorStorage<T> {
     /// Sum over every dimension in `dims`, yielding a tensor with those
     /// dimensions removed. An empty `dims` aggregates over all dimensions.
     ///
@@ -8,7 +9,7 @@ impl TensorStorage {
     /// - all dims     -> flat/scaled `sum_all` pass (no intermediate allocations)
     /// - a single dim -> tight strided loop (`reduce_single_dim`)
     /// - otherwise    -> general stride-odometer pass (`reduce_dims`)
-    pub fn sum(a: &TensorStorage, dims: &[usize]) -> TensorStorage {
+    pub fn sum(a: &TensorStorage<T>, dims: &[usize]) -> TensorStorage<T> {
         let dims = resolve_dims(dims, &a.shape);
 
         if dims.len() == a.shape.len() {
@@ -21,7 +22,7 @@ impl TensorStorage {
     /// Max over every dimension in `dims`, yielding the per-slice maximum over
     /// their combined cartesian product. An empty `dims` aggregates over all
     /// dimensions. A single reduced dim uses the tight strided loop.
-    pub fn max(a: &TensorStorage, dims: &[usize]) -> TensorStorage {
+    pub fn max(a: &TensorStorage<T>, dims: &[usize]) -> TensorStorage<T> {
         let dims = resolve_dims(dims, &a.shape);
 
         if dims.len() == a.shape.len() {
@@ -37,7 +38,12 @@ impl TensorStorage {
         }
     }
 
-    pub fn argmax(a: &TensorStorage, dim: usize) -> TensorStorage {
+    /// Argmax along `dim`, yielding the per-slice flat index as an `f64` tensor.
+    ///
+    /// The output is `f64` (not `T`) because index-valued results are used as
+    /// labels/masks on the float path; keeping them in this library's float
+    /// idiom leaves the dtype choice to the caller's `.cast`.
+    pub fn argmax(a: &TensorStorage<T>, dim: usize) -> TensorStorage<f64> {
         reduce_dims(
             a,
             &[dim],
@@ -49,7 +55,13 @@ impl TensorStorage {
 
     /// One-hot encode `source`'s labels into a fresh contiguous storage of shape
     /// `source.shape ++ [num_classes]`, validating the labels as they are read.
-    pub fn one_hot(source: &TensorStorage, num_classes: usize) -> TensorStorage {
+    ///
+    /// Labels may be floats or integers; the output is `f64` (`1.0`/`0.0`), the
+    /// representation the softmax-loss path consumes.
+    pub fn one_hot(source: &TensorStorage<T>, num_classes: usize) -> TensorStorage<f64>
+    where
+        T: OneHotLabel,
+    {
         let mut out_shape = source.shape.clone();
         out_shape.push(num_classes);
 
@@ -60,20 +72,11 @@ impl TensorStorage {
             .strided_indices()
             .enumerate()
             .map(|(i, f)| {
-                let raw = source.buffer[f];
-                if raw.fract() != 0.0 {
-                    panic!("One-hotted tensor has value {raw} with fractional part at index {i}.")
-                }
-                if raw < 0.0 {
-                    panic!("One-hotted tensor has negative value {raw} at index {i}.")
-                }
-                let cls = raw as usize;
+                let cls = source.buffer[f].as_class();
                 if cls >= num_classes {
                     panic!(
-                        "One-hotting with num_classes={} but tensor has value {} at index {}",
-                        num_classes - 1,
-                        raw,
-                        i
+                        "One-hotting with num_classes={} but found an out-of-range label at index {}.",
+                        num_classes, i
                     )
                 }
                 cls
@@ -90,10 +93,12 @@ impl TensorStorage {
     }
 
     /// Reduce over every dimension in a single pass, yielding a scalar `[]`.
-    fn sum_all(a: &TensorStorage) -> TensorStorage {
+    fn sum_all(a: &TensorStorage<T>) -> TensorStorage<T> {
         if a.contiguous {
-            // Flat slice sum: auto-vectorizes cleanly and does not allocate.
-            let total = a.buffer[a.offset..a.offset + a.numel].iter().sum();
+            // Flat slice fold: auto-vectorizes cleanly and does not allocate.
+            let total = a.buffer[a.offset..a.offset + a.numel]
+                .iter()
+                .fold(T::ZERO, |acc, &v| acc + v);
             TensorStorage::from_buffer(Vec::new(), vec![total])
         } else {
             // Strided view: walk the reduced dims with the stride odometer instead
@@ -104,12 +109,12 @@ impl TensorStorage {
     }
 
     /// Max over every dimension in a single pass, yielding a scalar `[]`.
-    pub fn max_all(a: &TensorStorage) -> TensorStorage {
+    pub fn max_all(a: &TensorStorage<T>) -> TensorStorage<T> {
         if a.contiguous {
-            // Flat slice fold: no stride bookkeeping, vectorizes the fcmp/select.
-            let total = a.buffer[a.offset..a.offset + a.numel]
-                .iter()
-                .fold(f64::NEG_INFINITY, |acc, v| if *v > acc { *v } else { acc });
+            // Flat slice fold seeded with the first element: no stride
+            // bookkeeping, vectorizes the cmp/select.
+            let slice = &a.buffer[a.offset..a.offset + a.numel];
+            let total = slice.iter().skip(1).fold(slice[0], |acc, v| if *v > acc { *v } else { acc });
             TensorStorage::from_buffer(Vec::new(), vec![total])
         } else {
             // Strided view: same odometer walk as `sum_all`.
@@ -125,6 +130,68 @@ impl TensorStorage {
     }
 }
 
+/// Elements that can act as one-hot class labels: any float with an integral,
+/// non-negative value, or any integer. The float forms validate while reading;
+/// integers are labels by construction.
+pub trait OneHotLabel: Dtype {
+    /// Convert to a class index, panicking on a non-label value.
+    fn as_class(self) -> usize;
+}
+
+impl OneHotLabel for f32 {
+    fn as_class(self) -> usize {
+        if self.fract() != 0.0 {
+            panic!("One-hotted tensor has value {self} with fractional part.")
+        }
+        if self < 0.0 {
+            panic!("One-hotted tensor has negative value {self}.")
+        }
+        self as usize
+    }
+}
+
+impl OneHotLabel for f64 {
+    fn as_class(self) -> usize {
+        if self.fract() != 0.0 {
+            panic!("One-hotted tensor has value {self} with fractional part.")
+        }
+        if self < 0.0 {
+            panic!("One-hotted tensor has negative value {self}.")
+        }
+        self as usize
+    }
+}
+
+macro_rules! impl_one_hot_signed {
+    ($($t:ty),+ $(,)?) => {
+        $(
+            impl OneHotLabel for $t {
+                fn as_class(self) -> usize {
+                    if self < 0 {
+                        panic!("One-hotted tensor has negative value {self}.")
+                    }
+                    self as usize
+                }
+            }
+        )+
+    };
+}
+
+macro_rules! impl_one_hot_unsigned {
+    ($($t:ty),+ $(,)?) => {
+        $(
+            impl OneHotLabel for $t {
+                fn as_class(self) -> usize {
+                    self as usize
+                }
+            }
+        )+
+    };
+}
+
+impl_one_hot_signed!(i8, i16, i32, i64);
+impl_one_hot_unsigned!(u8, u16, u32, u64);
+
 /// Shared multi-dimension reduction.
 ///
 /// Visits every output slice (the shape without `dims`, in row-major order), seeds an
@@ -138,16 +205,16 @@ impl TensorStorage {
 ///
 /// Exposed for the kernel benchmarks in `tests/storage/reduce.rs`.
 #[doc(hidden)]
-pub fn reduce_dims<A, F, G>(
-    a: &TensorStorage,
+pub fn reduce_dims<T: Numeric, U: Dtype, A, F, G>(
+    a: &TensorStorage<T>,
     dims: &[usize],
-    seed: impl Fn(f64) -> A,
+    seed: impl Fn(T) -> A,
     fold: F,
     finish: G,
-) -> TensorStorage
+) -> TensorStorage<U>
 where
-    F: Fn(A, f64) -> A,
-    G: Fn(A) -> f64,
+    F: Fn(A, T) -> A,
+    G: Fn(A) -> U,
 {
     let dims = normalize_dims(dims, &a.shape);
 
@@ -160,10 +227,8 @@ where
     // build output shape
     let out_shape = squeezed_shape(&a.shape, &dims);
 
-    let mut out = TensorStorage::new(out_shape, 0.0);
-
-    let out_numel = out.numel;
-    let out_buf = out.buffer_mut();
+    let out_numel: usize = out_shape.iter().product();
+    let mut out_buf: Vec<U> = Vec::with_capacity(out_numel);
     let a_buf = &a.buffer;
 
     // elements along the reduced dims are `reduced_strides[k]` apart in flat space
@@ -176,8 +241,8 @@ where
     let mut coords = vec![0usize; dims.len()];
 
     // iterate over output logical indices
-    for out_i in 0..out_numel {
-        let mut f = bases[out_i];
+    for base in bases {
+        let mut f = base;
         let mut acc = seed(a_buf[f]);
 
         coords.fill(0);
@@ -202,51 +267,49 @@ where
             acc = fold(acc, a_buf[f]);
         }
 
-        out_buf[out_i] = finish(acc);
+        out_buf.push(finish(acc));
     }
 
-    out
+    TensorStorage::from_buffer(out_shape, out_buf)
 }
 
 /// Tight single-dimension reduction: consecutive elements along the reduced dim
 /// are `a.strides[dim]` apart in flat space, so the inner loop is just a strided
 /// walk with no odometer bookkeeping.
-fn reduce_single_dim<A, F, G>(
-    a: &TensorStorage,
+fn reduce_single_dim<T: Numeric, U: Dtype, A, F, G>(
+    a: &TensorStorage<T>,
     dim: usize,
-    seed: impl Fn(f64) -> A,
+    seed: impl Fn(T) -> A,
     fold: F,
     finish: G,
-) -> TensorStorage
+) -> TensorStorage<U>
 where
-    F: Fn(A, f64) -> A,
-    G: Fn(A) -> f64,
+    F: Fn(A, T) -> A,
+    G: Fn(A) -> U,
 {
     // build output shape
     let out_shape = squeezed_shape(&a.shape, &[dim]);
 
-    let mut out = TensorStorage::new(out_shape, 0.0);
-
-    let out_numel = out.numel;
-    let out_buf = out.buffer_mut();
+    let out_numel: usize = out_shape.iter().product();
+    let mut out_buf: Vec<U> = Vec::with_capacity(out_numel);
     let a_buf = &a.buffer;
 
     let reduced_stride = a.strides[dim];
     let bases = base_offsets(a, &[dim]);
 
     // iterate over output logical indices
-    for out_i in 0..out_numel {
-        let mut f = bases[out_i];
+    for base in bases {
+        let mut f = base;
         let mut acc = seed(a_buf[f]);
         for _ in 1..a.shape[dim] {
             f += reduced_stride;
             acc = fold(acc, a_buf[f]);
         }
 
-        out_buf[out_i] = finish(acc);
+        out_buf.push(finish(acc));
     }
 
-    out
+    TensorStorage::from_buffer(out_shape, out_buf)
 }
 
 /// Flat offset of the first element of each output slice, walked in output
@@ -254,7 +317,7 @@ where
 ///
 /// Uses an odometer over the non-reduced dims to avoid any per-element division
 /// or multi-dim index allocation.
-fn base_offsets(a: &TensorStorage, dims: &[usize]) -> Vec<usize> {
+fn base_offsets<T: Dtype>(a: &TensorStorage<T>, dims: &[usize]) -> Vec<usize> {
     let reduced_total: usize = dims.iter().map(|&d| a.shape[d]).product();
     let out_numel = a.numel / reduced_total;
     let out_ndim = a.shape.len() - dims.len();

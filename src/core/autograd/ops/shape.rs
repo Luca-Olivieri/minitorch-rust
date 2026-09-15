@@ -1,18 +1,20 @@
-use crate::core::autograd::grad_fn::*;
-use crate::core::tensor::{AbstractTensor, GraphTensor};
+use crate::core::{
+    GraphTensor,
+    autograd::grad_fn::*,
+    dtype::Numeric,
+    tensor::AbstractTensor,
+};
 
 #[derive(Debug)]
 pub struct CopyDOp {}
 
-pub type BackwardCopyD = NBackwardOp<CopyDOp, 1>;
-
-impl GradRule<1> for CopyDOp {
+impl<T: Numeric> GradRule<1, T> for CopyDOp {
     fn compute_grad(
         &self,
-        operands: &[GraphTensor; 1],
-        in_grad: &GraphTensor,
+        operands: &[GraphTensor<T>; 1],
+        in_grad: &GraphTensor<T>,
         _retain_graph: bool,
-        out: &mut Vec<Option<GraphTensor>>,
+        out: &mut Vec<Option<GraphTensor<T>>>,
     ) {
         out.push(operands[0].requires_grad().then(|| in_grad.copy_d()));
     }
@@ -23,15 +25,13 @@ pub struct UnsqueezeOp {
     pub dim: usize,
 }
 
-pub type BackwardUnsqueeze = NBackwardOp<UnsqueezeOp, 1>;
-
-impl GradRule<1> for UnsqueezeOp {
+impl<T: Numeric> GradRule<1, T> for UnsqueezeOp {
     fn compute_grad(
         &self,
-        operands: &[GraphTensor; 1],
-        in_grad: &GraphTensor,
+        operands: &[GraphTensor<T>; 1],
+        in_grad: &GraphTensor<T>,
         _retain_graph: bool,
-        out: &mut Vec<Option<GraphTensor>>,
+        out: &mut Vec<Option<GraphTensor<T>>>,
     ) {
         out.push(
             operands[0]
@@ -46,15 +46,13 @@ pub struct SqueezeOp {
     pub dim: usize,
 }
 
-pub type BackwardSqueeze = NBackwardOp<SqueezeOp, 1>;
-
-impl GradRule<1> for SqueezeOp {
+impl<T: Numeric> GradRule<1, T> for SqueezeOp {
     fn compute_grad(
         &self,
-        operands: &[GraphTensor; 1],
-        in_grad: &GraphTensor,
+        operands: &[GraphTensor<T>; 1],
+        in_grad: &GraphTensor<T>,
         _retain_graph: bool,
-        out: &mut Vec<Option<GraphTensor>>,
+        out: &mut Vec<Option<GraphTensor<T>>>,
     ) {
         out.push(
             operands[0]
@@ -70,15 +68,13 @@ pub struct TransposeOp {
     pub dim_b: usize,
 }
 
-pub type BackwardTranspose = NBackwardOp<TransposeOp, 1>;
-
-impl GradRule<1> for TransposeOp {
+impl<T: Numeric> GradRule<1, T> for TransposeOp {
     fn compute_grad(
         &self,
-        operands: &[GraphTensor; 1],
-        in_grad: &GraphTensor,
+        operands: &[GraphTensor<T>; 1],
+        in_grad: &GraphTensor<T>,
         _retain_graph: bool,
-        out: &mut Vec<Option<GraphTensor>>,
+        out: &mut Vec<Option<GraphTensor<T>>>,
     ) {
         // transpose is its own inverse: transposing the same dims twice is a no-op
         out.push(
@@ -94,15 +90,13 @@ pub struct ExpandOp {
     pub dim: usize,
 }
 
-pub type BackwardExpand = NBackwardOp<ExpandOp, 1>;
-
-impl GradRule<1> for ExpandOp {
+impl<T: Numeric> GradRule<1, T> for ExpandOp {
     fn compute_grad(
         &self,
-        operands: &[GraphTensor; 1],
-        in_grad: &GraphTensor,
+        operands: &[GraphTensor<T>; 1],
+        in_grad: &GraphTensor<T>,
         _retain_graph: bool,
-        out: &mut Vec<Option<GraphTensor>>,
+        out: &mut Vec<Option<GraphTensor<T>>>,
     ) {
         out.push(operands[0].requires_grad().then(|| {
             // keepdim: summing an expanded (stride-0) axis yields a size-1 axis
@@ -117,15 +111,13 @@ pub struct BroadcastOp {
     pub old_shape: Vec<usize>,
 }
 
-pub type BackwardBroadcast = NBackwardOp<BroadcastOp, 1>;
-
-impl GradRule<1> for BroadcastOp {
+impl<T: Numeric> GradRule<1, T> for BroadcastOp {
     fn compute_grad(
         &self,
-        operands: &[GraphTensor; 1],
-        in_grad: &GraphTensor,
+        operands: &[GraphTensor<T>; 1],
+        in_grad: &GraphTensor<T>,
         retain_graph: bool,
-        out: &mut Vec<Option<GraphTensor>>,
+        out: &mut Vec<Option<GraphTensor<T>>>,
     ) {
         // The forward op produced `in_grad.shape()` from an operand of shape
         // `self.old_shape`; the gradient is the sum of `in_grad` over every

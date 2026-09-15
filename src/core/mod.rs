@@ -1,4 +1,5 @@
 pub mod autograd;
+pub mod dtype;
 pub mod nn;
 pub(crate) mod node;
 pub(crate) mod storage;

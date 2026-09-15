@@ -5,14 +5,13 @@ use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
-use crate::core::GraphTensor;
-use crate::core::node::TensorNode;
+use crate::core::{GraphTensor, dtype::{Dtype, Float}, node::TensorNode};
 
-pub struct TensorKey {
-    node: Rc<TensorNode>, // TODO or use GraphTensor directly
+pub struct TensorKey<T: Dtype = f64> {
+    node: Rc<TensorNode<T>>, // TODO or use GraphTensor directly
 }
 
-impl Clone for TensorKey {
+impl<T: Dtype> Clone for TensorKey<T> {
     fn clone(&self) -> Self {
         TensorKey {
             node: Rc::clone(&self.node),
@@ -20,30 +19,30 @@ impl Clone for TensorKey {
     }
 }
 
-impl PartialEq for TensorKey {
+impl<T: Dtype> PartialEq for TensorKey<T> {
     fn eq(&self, other: &Self) -> bool {
         Rc::as_ptr(&self.node) == Rc::as_ptr(&other.node)
     }
 }
 
-impl Eq for TensorKey {}
+impl<T: Dtype> Eq for TensorKey<T> {}
 
-impl Hash for TensorKey {
+impl<T: Dtype> Hash for TensorKey<T> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         Rc::as_ptr(&self.node).hash(state);
     }
 }
 
-impl GraphTensor {
-    pub fn to_key(&self) -> TensorKey {
+impl<T: Dtype> GraphTensor<T> {
+    pub fn to_key(&self) -> TensorKey<T> {
         TensorKey {
             node: Rc::clone(&self.node),
         }
     }
 }
 
-impl GraphTensor {
-    pub fn backward(&self, retain_graph: bool) -> HashMap<TensorKey, GraphTensor> {
+impl<T: Float> GraphTensor<T> {
+    pub fn backward(&self, retain_graph: bool) -> HashMap<TensorKey<T>, GraphTensor<T>> {
         self.compile_backward().run(retain_graph)
     }
 
@@ -53,7 +52,7 @@ impl GraphTensor {
     /// stays valid as long as the graph is alive and can be re-executed any number of
     /// times (e.g. with different `retain_graph` flags), reusing the compiled
     /// topological schedule and the gradient/scratch buffers across runs.
-    pub fn compile_backward(&self) -> BackwardPlan {
+    pub fn compile_backward(&self) -> BackwardPlan<T> {
         BackwardPlan::build(self)
     }
 }
@@ -63,22 +62,25 @@ impl GraphTensor {
 /// Nodes are assigned dense integer indices once at build time; subsequent runs are
 /// pure integer/Vec operations (no hashing, no per-node key churn, no per-node
 /// scratch allocations) until the final leaf-gradient map is materialized.
-pub struct BackwardPlan {
-    nodes: Vec<TensorKey>,
+///
+/// Backward passes only run for float dtypes (every gradient is a float workload),
+/// so the plan's gradient buffers are `GraphTensor<T>` for `T: Float`.
+pub struct BackwardPlan<T: Dtype = f64> {
+    nodes: Vec<TensorKey<T>>,
     seed_idx: usize,
     operands: Vec<Vec<usize>>,
     is_leaf: Vec<bool>,
     base_in_degree: Vec<usize>,
-    grads: Vec<Option<GraphTensor>>,
-    scratch: Vec<Option<GraphTensor>>,
+    grads: Vec<Option<GraphTensor<T>>>,
+    scratch: Vec<Option<GraphTensor<T>>>,
 }
 
-impl BackwardPlan {
+impl<T: Float> BackwardPlan<T> {
     /// Walk the forward graph once, assigning each reachable, requires-grad node a
     /// dense index and recording its operand indices, leaf-ness, and in-degree.
-    fn build(seed: &GraphTensor) -> BackwardPlan {
-        let mut nodes: Vec<TensorKey> = Vec::new();
-        let mut index_of: HashMap<*const TensorNode, usize> = HashMap::new();
+    fn build(seed: &GraphTensor<T>) -> BackwardPlan<T> {
+        let mut nodes: Vec<TensorKey<T>> = Vec::new();
+        let mut index_of: HashMap<*const TensorNode<T>, usize> = HashMap::new();
         let mut operands: Vec<Vec<usize>> = Vec::new();
         let mut is_leaf: Vec<bool> = Vec::new();
         let mut bfs_queue: VecDeque<usize> = VecDeque::new();
@@ -147,7 +149,7 @@ impl BackwardPlan {
     }
 
     /// Execute the compiled backward pass from the seed this plan was built for.
-    pub fn run(&mut self, retain_graph: bool) -> HashMap<TensorKey, GraphTensor> {
+    pub fn run(&mut self, retain_graph: bool) -> HashMap<TensorKey<T>, GraphTensor<T>> {
         assert!(
             self.nodes[self.seed_idx].node.requires_grad,
             "Cannot run backward() on a tensor with requires_grad=False. Likely, the graph has no leaf nodes requiring gradients."
@@ -161,7 +163,7 @@ impl BackwardPlan {
         // NOTE: if 'retain_graph' = True, the gradient tensors have 'requires_grad = True'
         //       otherwise, you cannot compute higher-order derivatives
         let seed_shape = self.nodes[self.seed_idx].node.storage.shape.clone();
-        let seed_grad = GraphTensor::new(seed_shape, 1.0, retain_graph);
+        let seed_grad = GraphTensor::new(seed_shape, T::from_f64(1.0), retain_graph);
         self.grads[self.seed_idx] = Some(seed_grad.copy_s());
 
         let mut process_queue: VecDeque<usize> = VecDeque::new();
@@ -227,10 +229,10 @@ impl BackwardPlan {
 /// in place, skipping the allocation and the graph node entirely. Fall back to
 /// the allocating sum when the buffer cannot be mutated (shared/aliased or
 /// strided).
-fn accumulate_grad(
-    grads: &mut [Option<GraphTensor>],
+fn accumulate_grad<T: Float>(
+    grads: &mut [Option<GraphTensor<T>>],
     v: usize,
-    op_grad: &GraphTensor,
+    op_grad: &GraphTensor<T>,
     retain_graph: bool,
 ) {
     if retain_graph {
@@ -256,7 +258,7 @@ fn accumulate_grad(
 ///
 /// This destroys `a`'s pre-sum graph structure, so it is only used on the
 /// first-order (retain_graph = False) path.
-fn try_accumulate_inplace(a: &mut GraphTensor, b: &GraphTensor) -> bool {
+fn try_accumulate_inplace<T: Float>(a: &mut GraphTensor<T>, b: &GraphTensor<T>) -> bool {
     let Some(node) = Rc::get_mut(&mut a.node) else {
         return false;
     };

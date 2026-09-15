@@ -1,17 +1,17 @@
 use std::rc::Rc;
 
-use crate::core::GraphTensor;
-
 use crate::core::autograd::grad_fn::GradFnTrait;
-use crate::core::autograd::ops::math::{BackwardMatmul, MatmulOp};
-use crate::core::autograd::ops::reduce::{BackwardMax, BackwardSum, MaxOp, SumOp};
+use crate::core::autograd::ops::math::MatmulOp;
+use crate::core::autograd::ops::reduce::{MaxOp, SumOp};
+use crate::core::dtype::{Float, Numeric};
 use crate::core::node::TensorNode;
 use crate::core::storage::TensorStorage;
-use crate::core::storage::ops::reduce::resolve_dims;
+use crate::core::storage::ops::reduce::{OneHotLabel, resolve_dims};
 use crate::core::tensor::AbstractTensor;
+use crate::core::tensor::GraphTensor;
 use crate::core::tensor::ops::math::apply_tensor_op;
 
-impl GraphTensor {
+impl<T: Numeric> GraphTensor<T> {
     /// Sum over every dimension in `dims` at once.
     ///
     /// `dims` are indices into the input tensor and may be non-adjacent, e.g.
@@ -21,10 +21,10 @@ impl GraphTensor {
     /// With `keepdim` the reduced dimensions are retained as size 1 (so
     /// `x.sum(&[0, 2], true)` on `[2, 2, 3]` yields `[1, 2, 1]`), which keeps
     /// the result broadcastable against the input.
-    pub fn sum(&self, dims: &[usize], keepdim: bool) -> GraphTensor {
+    pub fn sum(&self, dims: &[usize], keepdim: bool) -> GraphTensor<T> {
         let dims = resolve_dims(dims, self.shape());
         apply_tensor_op(
-            |ops: &[&TensorStorage; 1]| {
+            |ops: &[&TensorStorage<T>; 1]| {
                 let reduced = TensorStorage::sum(ops[0], &dims);
                 if keepdim {
                     TensorStorage::unsqueeze_at(&reduced, &dims)
@@ -32,25 +32,17 @@ impl GraphTensor {
                     reduced
                 }
             },
-            Some(|operands: [GraphTensor; 1]| {
-                Box::new(BackwardSum {
+            Some(|operands: [GraphTensor<T>; 1]| {
+                Box::new(crate::core::autograd::grad_fn::NBackwardOp::<SumOp, 1, T> {
                     operands,
                     op: SumOp {
                         dims: dims.clone(),
                         keepdim,
                     },
-                }) as Box<dyn GradFnTrait>
+                }) as Box<dyn GradFnTrait<T>>
             }),
             &[self],
         )
-    }
-
-    /// Mean over every dimension in `dims` at once. An empty slice aggregates
-    /// over all dimensions. See [`Self::sum`] for the `keepdim` semantics.
-    pub fn mean(&self, dims: &[usize], keepdim: bool) -> GraphTensor {
-        let dims = resolve_dims(dims, self.shape());
-        let count: usize = dims.iter().map(|&d| self.shape()[d]).product();
-        &self.sum(&dims, keepdim) / (count as f64)
     }
 
     /// Max over every dimension in `dims` at once.
@@ -59,10 +51,10 @@ impl GraphTensor {
     /// empty slice aggregates over all dimensions. Gradient flows to every
     /// element that attains the per-slice maximum (like `torch.amax`). See
     /// [`Self::sum`] for the `keepdim` semantics.
-    pub fn max(&self, dims: &[usize], keepdim: bool) -> GraphTensor {
+    pub fn max(&self, dims: &[usize], keepdim: bool) -> GraphTensor<T> {
         let dims = resolve_dims(dims, self.shape());
         apply_tensor_op(
-            |ops: &[&TensorStorage; 1]| {
+            |ops: &[&TensorStorage<T>; 1]| {
                 let reduced = TensorStorage::max(ops[0], &dims);
                 if keepdim {
                     TensorStorage::unsqueeze_at(&reduced, &dims)
@@ -70,49 +62,44 @@ impl GraphTensor {
                     reduced
                 }
             },
-            Some(|operands: [GraphTensor; 1]| {
-                Box::new(BackwardMax {
+            Some(|operands: [GraphTensor<T>; 1]| {
+                Box::new(crate::core::autograd::grad_fn::NBackwardOp::<MaxOp, 1, T> {
                     operands,
                     op: MaxOp {
                         dims: dims.clone(),
                         keepdim,
                     },
-                }) as Box<dyn GradFnTrait>
+                }) as Box<dyn GradFnTrait<T>>
             }),
             &[self],
         )
     }
 
-    pub fn argmax(&self, dim: usize, keepdim: bool) -> GraphTensor {
-        apply_tensor_op(
-            |ops: &[&TensorStorage; 1]| {
-                let reduced = TensorStorage::argmax(ops[0], dim);
-                if keepdim {
-                    TensorStorage::unsqueeze(&reduced, dim)
-                } else {
-                    reduced
-                }
-            },
-            None::<fn([GraphTensor; 1]) -> Box<dyn GradFnTrait>>,
-            &[self],
-        )
-    }
-
-    pub fn one_hot(&self, num_classes: usize) -> GraphTensor {
-        let out_storage = TensorStorage::one_hot(&self.node.storage, num_classes);
+    /// Argmax along `dim`, yielding the per-slice flat index as a `f64` tensor
+    /// (labels are consumed by the dtype they are cast to). Non-differentiable.
+    pub fn argmax(&self, dim: usize, keepdim: bool) -> GraphTensor<f64> {
+        let reduced = TensorStorage::argmax(&self.node.storage, dim);
+        let out_store = if keepdim {
+            TensorStorage::unsqueeze(&reduced, dim)
+        } else {
+            reduced
+        };
 
         let out_node = TensorNode {
-            storage: out_storage,
+            storage: out_store,
             requires_grad: false,
             grad_fn: None,
         };
 
-        Self {
+        GraphTensor {
             node: Rc::new(out_node),
         }
     }
 
-    pub fn matmul(a: &GraphTensor, b: &GraphTensor) -> GraphTensor {
+    /// Direct [m,k] x [k,n] -> [m,n] gemm. 1D operands are treated as [1,k]
+    /// / [k,1] rows/columns (NumPy semantics) and the corresponding axis of the
+    /// result is squeezed away.
+    pub fn matmul(a: &GraphTensor<T>, b: &GraphTensor<T>) -> GraphTensor<T> {
         let a_shape = a.shape();
         let b_shape = b.shape();
 
@@ -154,10 +141,10 @@ impl GraphTensor {
         // Only attach a grad_fn if at least one operand requires gradients.
         let requires_grad = a.requires_grad() || b.requires_grad();
         let grad_fn = requires_grad.then(|| {
-            Box::new(BackwardMatmul {
+            Box::new(crate::core::autograd::grad_fn::NBackwardOp::<MatmulOp, 2, T> {
                 operands: [a.copy_s(), b.copy_s()],
                 op: MatmulOp {},
-            }) as Box<dyn GradFnTrait>
+            }) as Box<dyn GradFnTrait<T>>
         });
 
         let out_node = TensorNode {
@@ -167,6 +154,38 @@ impl GraphTensor {
         };
 
         GraphTensor {
+            node: Rc::new(out_node),
+        }
+    }
+}
+
+impl<T: Float> GraphTensor<T> {
+    /// Mean over every dimension in `dims` at once. An empty slice aggregates
+    /// over all dimensions. See [`crate::core::tensor::GraphTensor::sum`] for
+    /// the `keepdim` semantics.
+    pub fn mean(&self, dims: &[usize], keepdim: bool) -> GraphTensor<T> {
+        let dims = resolve_dims(dims, self.shape());
+        let count: usize = dims.iter().map(|&d| self.shape()[d]).product();
+        let count_t = T::from_f64(count as f64);
+        &self.sum(&dims, keepdim) / count_t
+    }
+}
+
+impl<T: Numeric + OneHotLabel> GraphTensor<T> {
+    /// One-hot encode the labels in `self` into a fresh tensor of shape
+    /// `self.shape ++ [num_classes]`. Labels may be floats (validated integral,
+    /// non-negative) or integers; the output is `f64` (`1.0`/`0.0`), the
+    /// representation the softmax-loss path consumes. Non-differentiable.
+    pub fn one_hot(&self, num_classes: usize) -> GraphTensor<f64> {
+        let out_storage = TensorStorage::one_hot(&self.node.storage, num_classes);
+
+        let out_node = TensorNode {
+            storage: out_storage,
+            requires_grad: false,
+            grad_fn: None,
+        };
+
+        GraphTensor::<f64> {
             node: Rc::new(out_node),
         }
     }

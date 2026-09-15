@@ -1,10 +1,13 @@
+use crate::core::dtype::Dtype;
 use crate::core::storage::compute_numel_from_shape;
 use std::rc::Rc;
 
 use crate::core::storage::TensorStorage;
 
-impl TensorStorage {
-    pub fn copy_d(a: &TensorStorage) -> TensorStorage {
+impl<T: Dtype> TensorStorage<T> {
+    /// Deep copy: duplicate the underlying flat data so the result shares no
+    /// buffer with `a`.
+    pub fn copy_d(a: &TensorStorage<T>) -> TensorStorage<T> {
         TensorStorage {
             buffer: Rc::new(a.buffer.as_ref().clone()),
             shape: a.shape.clone(),
@@ -15,7 +18,8 @@ impl TensorStorage {
         }
     }
 
-    pub fn copy_s(a: &TensorStorage) -> TensorStorage {
+    /// Shallow copy: a view that shares the underlying flat data with `a`.
+    pub fn copy_s(a: &TensorStorage<T>) -> TensorStorage<T> {
         TensorStorage {
             buffer: Rc::clone(&a.buffer),
             shape: a.shape.clone(),
@@ -25,8 +29,10 @@ impl TensorStorage {
             offset: a.offset,
         }
     }
+}
 
-    pub fn unsqueeze(a: &TensorStorage, dim: usize) -> TensorStorage {
+impl<T: Dtype> TensorStorage<T> {
+    pub fn unsqueeze(a: &TensorStorage<T>, dim: usize) -> TensorStorage<T> {
         if dim > a.shape.len() {
             panic!(
                 "Unsqueezed dimension {} out of range for shape of length {:?}.",
@@ -51,7 +57,7 @@ impl TensorStorage {
     /// Re-insert a size-1 axis for every dimension in `dims` (in increasing
     /// order), turning a squeezed reduction result back into a keepdim view.
     /// Purely metadata: no data is copied.
-    pub fn unsqueeze_at(a: &TensorStorage, dims: &[usize]) -> TensorStorage {
+    pub fn unsqueeze_at(a: &TensorStorage<T>, dims: &[usize]) -> TensorStorage<T> {
         if dims.windows(2).any(|w| w[0] >= w[1]) {
             panic!(
                 "Dimensions {:?} must be strictly increasing for unsqueeze_at, otherwise the re-inserted axes end up in the wrong positions.",
@@ -71,7 +77,7 @@ impl TensorStorage {
     /// removed first so the remaining indices stay valid. Purely metadata: no
     /// data is copied.
     #[allow(dead_code)]
-    pub fn squeeze_at(a: &TensorStorage, dims: &[usize]) -> TensorStorage {
+    pub fn squeeze_at(a: &TensorStorage<T>, dims: &[usize]) -> TensorStorage<T> {
         if dims.windows(2).any(|w| w[0] >= w[1]) {
             panic!(
                 "Dimensions {:?} must be strictly increasing for squeeze_at, otherwise the removed axes end up in the wrong positions.",
@@ -87,7 +93,7 @@ impl TensorStorage {
         out
     }
 
-    pub fn squeeze(a: &TensorStorage, dim: usize) -> TensorStorage {
+    pub fn squeeze(a: &TensorStorage<T>, dim: usize) -> TensorStorage<T> {
         if dim >= a.shape.len() {
             panic!(
                 "Squeezed dimension {} out of range for shape of length {:?}.",
@@ -117,7 +123,7 @@ impl TensorStorage {
         }
     }
 
-    pub fn transpose(a: &TensorStorage, dim_a: usize, dim_b: usize) -> TensorStorage {
+    pub fn transpose(a: &TensorStorage<T>, dim_a: usize, dim_b: usize) -> TensorStorage<T> {
         if dim_a >= a.shape.len() || dim_b >= a.shape.len() {
             panic!(
                 "Transposed dimensions {} and {} out of range for shape of length {:?}.",
@@ -149,7 +155,7 @@ impl TensorStorage {
         }
     }
 
-    pub fn expand(a: &TensorStorage, dim: usize, times: usize) -> TensorStorage {
+    pub fn expand(a: &TensorStorage<T>, dim: usize, times: usize) -> TensorStorage<T> {
         if dim >= a.shape.len() {
             panic!(
                 "Expanded dimension {} out of range for shape of length {:?}.",
@@ -189,7 +195,7 @@ impl TensorStorage {
     ///
     /// All input tensors must have identical shapes. The output has shape
     /// `[N, original_shape...]` where `N` is the number of inputs.
-    pub fn stack(storages: &[&TensorStorage]) -> TensorStorage {
+    pub fn stack(storages: &[&TensorStorage<T>]) -> TensorStorage<T> {
         if storages.is_empty() {
             panic!("Cannot stack an empty list of tensors.");
         }
@@ -224,11 +230,11 @@ impl TensorStorage {
     }
 
     #[allow(dead_code)]
-    pub fn broadcast(&self, b: &TensorStorage) -> TensorStorage {
+    pub fn broadcast(&self, b: &TensorStorage<T>) -> TensorStorage<T> {
         Self::broadcast_to_shape(self, &b.shape)
     }
 
-    pub fn broadcast_to_shape(&self, shape: &[usize]) -> TensorStorage {
+    pub fn broadcast_to_shape(&self, shape: &[usize]) -> TensorStorage<T> {
         if !self.is_broadcastable(shape) {
             panic!(
                 "Shape {:?} cannot be broadcasted to {:?}",

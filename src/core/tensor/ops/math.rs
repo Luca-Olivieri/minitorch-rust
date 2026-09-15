@@ -1,60 +1,77 @@
 use std::ops::{Add, Div, Mul, Neg, Sub};
-use std::rc::Rc;
 
 use crate::core::autograd::grad_fn::GradFnTrait;
+use crate::core::autograd::grad_fn::NBackwardOp;
 use crate::core::autograd::ops::math::{
-    AddOp, BackwardAdd, BackwardDiv, BackwardExp, BackwardLn, BackwardMaximum, BackwardMul,
-    BackwardNeg, BackwardPow, BackwardSqrt, BackwardSub, DivOp, ExpOp, LnOp, MaximumOp, MulOp,
-    NegOp, PowOp, SqrtOp, SubOp,
+    AddOp, DivOp, ExpOp, LnOp, MaximumOp, MulOp, NegOp, PowOp, SqrtOp, SubOp,
 };
-use crate::core::node::TensorNode;
+use crate::core::dtype::{Dtype, Float, Numeric};
 use crate::core::storage::TensorStorage;
-use crate::core::tensor::GraphTensor;
 use crate::core::tensor::extract_requires_grad;
+use crate::core::tensor::GraphTensor;
 
-impl GraphTensor {
-    impl_tensor_unary_op!(ln, TensorStorage::ln, BackwardLn, LnOp);
-    impl_tensor_unary_op!(exp, TensorStorage::exp, BackwardExp, ExpOp);
-    impl_tensor_unary_op!(sqrt, TensorStorage::sqrt, BackwardSqrt, SqrtOp);
-    impl_tensor_binary_op!(pow, TensorStorage::pow, BackwardPow, PowOp);
-    impl_tensor_binary_op!(maximum, TensorStorage::maximum, BackwardMaximum, MaximumOp);
+// Math ops live in two dtype homes, chosen by what their backward math needs:
+//
+// - Numeric home: add/mul (signed-agnostic, gradient is a broadcast/passthrough)
+//   and maximum (mask-based gradient needs only comparisons).
+// - Float home: sub/div (backward uses neg/div), neg, and the transcendental
+//   pow/ln/exp/sqrt (float-only kernels and derivatives).
 
-    pub fn norm(&self) -> GraphTensor {
-        (self * self).sum(&[], false).sqrt()
-    }
-    pub fn dist(a: &GraphTensor, b: &GraphTensor) -> GraphTensor {
-        (a - b).norm()
-    }
+impl<T: Numeric> GraphTensor<T> {
+    impl_tensor_binary_method!(maximum, TensorStorage::maximum, MaximumOp);
 
-    pub fn sub_scaled(&self, other: &GraphTensor, scale: f64) -> GraphTensor {
-        // Computes self - scale * other in a single fused pass (no intermediate).
+    /// out[i] = self[i] - scale * other[i], fused into a single storage pass.
+    /// Non-differentiable (a linear combination used by the optimizers).
+    pub fn sub_scaled(&self, other: &GraphTensor<T>, scale: T) -> GraphTensor<T> {
         apply_tensor_op(
-            |ops: &[&TensorStorage; 2]| TensorStorage::sub_scaled(ops[0], ops[1], scale),
-            None::<fn([GraphTensor; 2]) -> Box<dyn GradFnTrait>>,
+            |ops: &[&TensorStorage<T>; 2]| TensorStorage::sub_scaled(ops[0], ops[1], scale),
+            None::<fn([GraphTensor<T>; 2]) -> Box<dyn GradFnTrait<T>>>,
             &[self, other],
         )
     }
 }
 
 impl_tensor_binary_ops! {
-    Add, add, TensorStorage::add,  BackwardAdd, AddOp;
-    Sub, sub, TensorStorage::sub,  BackwardSub, SubOp;
-    Mul, mul, TensorStorage::mul,  BackwardMul, MulOp;
-    Div, div, TensorStorage::div,  BackwardDiv, DivOp;
+    Numeric, Add, add, TensorStorage::add,  AddOp;
+    Numeric, Mul, mul, TensorStorage::mul,  MulOp;
+    Float,   Sub, sub, TensorStorage::sub,  SubOp;
+    Float,   Div, div, TensorStorage::div,  DivOp;
 }
 
 impl_tensor_unary_ops! {
-    Neg, neg, TensorStorage::neg, BackwardNeg, NegOp;
+    Float, Neg, neg, TensorStorage::neg, NegOp;
 }
 
-pub(crate) fn apply_tensor_op<F, G, const N: usize>(
+impl_tensor_scalar_ops! {
+    Numeric, Add, add;
+    Numeric, Mul, mul;
+    Float,   Sub, sub;
+    Float,   Div, div;
+}
+
+impl<T: Float> GraphTensor<T> {
+    impl_tensor_unary_method!(ln, TensorStorage::ln, LnOp);
+    impl_tensor_unary_method!(exp, TensorStorage::exp, ExpOp);
+    impl_tensor_unary_method!(sqrt, TensorStorage::sqrt, SqrtOp);
+    impl_tensor_binary_method!(pow, TensorStorage::pow, PowOp);
+
+    pub fn norm(&self) -> GraphTensor<T> {
+        (self * self).sum(&[], false).sqrt()
+    }
+
+    pub fn dist(a: &GraphTensor<T>, b: &GraphTensor<T>) -> GraphTensor<T> {
+        (a - b).norm()
+    }
+}
+
+pub(crate) fn apply_tensor_op<T: Dtype, F, G, const N: usize>(
     op: F,
     grad_fn: Option<G>,
-    operands: &[&GraphTensor; N],
-) -> GraphTensor
+    operands: &[&GraphTensor<T>; N],
+) -> GraphTensor<T>
 where
-    F: Fn(&[&TensorStorage; N]) -> TensorStorage,
-    G: FnOnce([GraphTensor; N]) -> Box<dyn GradFnTrait>,
+    F: Fn(&[&TensorStorage<T>; N]) -> TensorStorage<T>,
+    G: FnOnce([GraphTensor<T>; N]) -> Box<dyn GradFnTrait<T>>,
 {
     // NumPy-style right-aligned broadcasting: every operand is expanded to a
     // common shape (via stride-0 views) before the storage op runs.
@@ -66,8 +83,8 @@ where
 
     // The broadcast views for operands whose shape differs from the common shape.
     // Declared here so the references in `storages` below outlive the `if` block.
-    let mut owned: Vec<TensorStorage> = Vec::with_capacity(N);
-    let storages: [&TensorStorage; N] = if needs_broadcast {
+    let mut owned: Vec<TensorStorage<T>> = Vec::with_capacity(N);
+    let storages: [&TensorStorage<T>; N] = if needs_broadcast {
         for o in operands {
             owned.push(o.node.storage.broadcast_to_shape(&target_shape));
         }
@@ -80,18 +97,18 @@ where
 
     // Only generate a grad_fn if one was provided
     let grad_fn_opt = grad_fn.map(|g| {
-        let new_operands: [GraphTensor; N] = std::array::from_fn(|i| operands[i].copy_s());
+        let new_operands: [GraphTensor<T>; N] = std::array::from_fn(|i| operands[i].copy_s());
         g(new_operands)
     });
 
-    let out_node = TensorNode {
+    let out_node = crate::core::node::TensorNode {
         storage: out_store,
         requires_grad: extract_requires_grad(operands),
         grad_fn: grad_fn_opt,
     };
 
     GraphTensor {
-        node: Rc::new(out_node),
+        node: std::rc::Rc::new(out_node),
     }
 }
 
@@ -117,11 +134,4 @@ fn broadcast_shape(shapes: &[&[usize]]) -> Vec<usize> {
     }
 
     out
-}
-
-impl_tensor_scalar_ops! {
-    Add, add;
-    Sub, sub;
-    Mul, mul;
-    Div, div;
 }

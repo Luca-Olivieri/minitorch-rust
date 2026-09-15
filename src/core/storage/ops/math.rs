@@ -1,31 +1,28 @@
+use crate::core::dtype::{Float, Numeric};
 use crate::core::storage::TensorStorage;
 
-// Not every storage-level op is reachable from the user-facing tensor layer yet,
-// so unused ones are explicitly allowed here.
-#[allow(dead_code)]
-impl TensorStorage {
-    impl_storage_elemwise_ops! {
+impl<T: Numeric> TensorStorage<T> {
+    // Not every storage-level op is reachable from the user-facing tensor layer yet,
+    // so unused ones are explicitly allowed here.
+    //
+    // add/sub/mul/div/modul/maximum are signed-agnostic, so they live on the full
+    // `Numeric` family: integer tensors get them too (with integer overflow semantics).
+    impl_storage_elemwise_ops!(TensorStorage<T>;
         add,     (a, b), a + b;
-        neg,     (a), -a;
         sub,     (a, b), a - b;
         mul,    (a, b), a * b;
         div,     (a, b), a / b;
         modul,   (a, b), a % b;
-        pow,     (b, e), b.powf(e);
-        ln,     (a), a.ln();
-        exp,     (a), a.exp();
-        abs,     (a), a.abs();
-        sqrt,     (a), a.sqrt();
         maximum, (a, b), if a > b { a } else { b };
-    }
+    );
 
     /// out[i] = a[i] - scale * b[i], fused into a single pass.
-    pub fn sub_scaled(a: &TensorStorage, b: &TensorStorage, scale: f64) -> TensorStorage {
+    pub fn sub_scaled(a: &TensorStorage<T>, b: &TensorStorage<T>, scale: T) -> TensorStorage<T> {
         crate::core::storage::ops::utils::apply_op(&[a, b], |&[av, bv]| av - scale * bv)
     }
 
     /// Direct [m,k] x [k,n] -> [m,n] GEMM kernel.
-    pub fn matmul(a: &TensorStorage, b: &TensorStorage) -> TensorStorage {
+    pub fn matmul(a: &TensorStorage<T>, b: &TensorStorage<T>) -> TensorStorage<T> {
         if a.shape.len() != 2 || b.shape.len() != 2 {
             panic!(
                 "TensorStorage::matmul requires 2D operands, got {:?} and {:?}.",
@@ -44,10 +41,9 @@ impl TensorStorage {
         let k = a.shape[1];
         let n = b.shape[1];
 
-        let mut out = TensorStorage::new(vec![m, n], 0.0);
+        // `out_buf` is freshly allocated and uniquely owned, so it is mutable.
+        let mut out_buf = vec![T::ZERO; m * n];
 
-        // `out` is freshly allocated, so its Rc is unique and mutable.
-        let out_buf = out.buffer_mut();
         let a_buf = &a.buffer;
         let b_buf = &b.buffer;
 
@@ -68,6 +64,19 @@ impl TensorStorage {
             }
         }
 
-        out
+        TensorStorage::from_buffer(vec![m, n], out_buf)
     }
+}
+
+impl<T: Float> TensorStorage<T> {
+    // neg/abs need a signed notion (undefined for unsigned integers) and
+    // pow/ln/exp/sqrt are transcendental, so they are float-only.
+    impl_storage_elemwise_ops!(TensorStorage<T>;
+        neg,     (a), -a;
+        pow,     (b, e), b.powf(e);
+        ln,     (a), a.ln();
+        exp,     (a), a.exp();
+        abs,     (a), a.abs();
+        sqrt,     (a), a.sqrt();
+    );
 }

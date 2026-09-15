@@ -15,6 +15,11 @@ path = "main/xor.rs"
 name = "covertype"
 path = "main/covertype.rs"
 
+[features]
+default = []
+allow_lossy_casts = []
+allow_dangerous_casts = []
+
 [dependencies]
 fmt = "0.1.0"
 rand = "0.10.2"

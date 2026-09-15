@@ -1,15 +1,16 @@
 use crate::core::autograd::grad_fn::GradFnTrait;
+use crate::core::dtype::Dtype;
 use crate::core::storage::TensorStorage;
 
 #[derive(Debug)]
-pub(crate) struct TensorNode {
-    pub(crate) storage: TensorStorage,
+pub(crate) struct TensorNode<T: Dtype = f64> {
+    pub(crate) storage: TensorStorage<T>,
     pub(crate) requires_grad: bool,
-    pub(crate) grad_fn: Option<Box<dyn GradFnTrait>>,
+    pub(crate) grad_fn: Option<Box<dyn GradFnTrait<T>>>,
 }
 
-impl TensorNode {
-    pub(crate) fn new(shape: Vec<usize>, fill_value: f64, requires_grad: bool) -> Self {
+impl<T: Dtype> TensorNode<T> {
+    pub(crate) fn new(shape: Vec<usize>, fill_value: T, requires_grad: bool) -> Self {
         Self {
             storage: TensorStorage::new(shape, fill_value),
             requires_grad,
@@ -17,7 +18,7 @@ impl TensorNode {
         }
     }
 
-    pub(crate) fn from_storage(storage: TensorStorage, requires_grad: bool) -> Self {
+    pub(crate) fn from_storage(storage: TensorStorage<T>, requires_grad: bool) -> Self {
         Self {
             storage,
             requires_grad,

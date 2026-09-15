@@ -1,3 +1,4 @@
+use crate::core::dtype::Dtype;
 use crate::core::storage::TensorStorage;
 
 /// Incremental row-major walk over a tensor's logical indices.
@@ -70,7 +71,7 @@ impl Iterator for StridedIter<'_> {
 
 impl ExactSizeIterator for StridedIter<'_> {}
 
-impl TensorStorage {
+impl<T: Dtype> TensorStorage<T> {
     /// Flat buffer indices of each logical element, in row-major order.
     ///
     /// Prefer this over per-element `self[i]` indexing when looping over every

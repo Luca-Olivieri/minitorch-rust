@@ -1,13 +1,14 @@
+use crate::core::dtype::{Dtype, Numeric};
 use crate::core::storage::TensorStorage;
 use std::rc::Rc;
 
-impl TensorStorage {
+impl<T: Numeric> TensorStorage<T> {
     /// Try to add `other`'s values into `self`'s buffer elementwise, in place.
     ///
     /// Returns `false` (without mutating anything) when the accumulation cannot be
     /// done safely in place: shape mismatch, `self` is a strided view, or the buffer
     /// is not uniquely owned. Callers should fall back to an allocating `a + b`.
-    pub(crate) fn try_add_assign(&mut self, other: &TensorStorage) -> bool {
+    pub(crate) fn try_add_assign(&mut self, other: &TensorStorage<T>) -> bool {
         if self.shape != other.shape || self.numel != other.numel {
             return false;
         }
@@ -35,7 +36,9 @@ impl TensorStorage {
 
         true
     }
+}
 
+impl<T: Dtype> TensorStorage<T> {
     pub(super) fn md_to_flat(&self, md_idx: &[usize]) -> usize {
         if md_idx.len() != self.shape.len() {
             panic!(
@@ -86,12 +89,12 @@ impl TensorStorage {
     }
 
     /// Multidimensional read: index by row-major coordinates.
-    pub(crate) fn at(&self, md_idx: &[usize]) -> &f64 {
+    pub(crate) fn at(&self, md_idx: &[usize]) -> &T {
         &self.buffer[self.md_to_flat(md_idx)]
     }
 
     /// Multidimensional write: index by row-major coordinates.
-    pub(crate) fn set(&mut self, md_idx: &[usize], value: f64) {
+    pub(crate) fn set(&mut self, md_idx: &[usize], value: T) {
         let f_idx = self.md_to_flat(md_idx);
         self.buffer_mut()[f_idx] = value;
     }
@@ -99,14 +102,14 @@ impl TensorStorage {
     /// Single-dimensional read: index by logical flat position (0..numel),
     /// resolved through strides when the storage is a strided view.
     #[allow(dead_code)]
-    pub(crate) fn at_logic(&self, l_idx: usize) -> &f64 {
+    pub(crate) fn at_logic(&self, l_idx: usize) -> &T {
         &self.buffer[self.logic_to_flat(l_idx)]
     }
 
     /// Single-dimensional write: index by logical flat position (0..numel),
     /// resolved through strides when the storage is a strided view.
     #[allow(dead_code)]
-    pub(crate) fn set_logic(&mut self, l_idx: usize, value: f64) {
+    pub(crate) fn set_logic(&mut self, l_idx: usize, value: T) {
         let f_idx = self.logic_to_flat(l_idx);
         self.buffer_mut()[f_idx] = value;
     }

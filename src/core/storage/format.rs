@@ -1,11 +1,12 @@
 use std::fmt;
 
+use crate::core::dtype::DtypeStyler;
 use crate::core::storage::TensorStorage;
 
-impl fmt::Display for TensorStorage {
+impl<T: DtypeStyler> fmt::Display for TensorStorage<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let data_indent = "       data=".len();
-        writeln!(f, "Tensor(shape={:?}, dtype=float,", self.shape)?;
+        writeln!(f, "Tensor(shape={:?}, dtype={},", self.shape, T::dtype_name())?;
         writeln!(
             f,
             "       numel={}, strides={:?}, contiguous={}, offset={},",
@@ -14,8 +15,8 @@ impl fmt::Display for TensorStorage {
         write!(f, "       data=")?;
 
         if self.shape.is_empty() {
-            if let Some(&val) = self.buffer.first() {
-                write!(f, "{:.4}", val)?;
+            if let Some(val) = self.buffer.first() {
+                T::fmt_val(val, f)?;
             }
         } else {
             let mut curr_md_idx: Vec<usize> = Vec::new();
@@ -26,7 +27,7 @@ impl fmt::Display for TensorStorage {
     }
 }
 
-impl TensorStorage {
+impl<T: DtypeStyler> TensorStorage<T> {
     fn print_recursive(
         &self,
         f: &mut fmt::Formatter<'_>,
@@ -40,10 +41,10 @@ impl TensorStorage {
             write!(f, "[")?;
             for i in 0..dim_size {
                 curr_md_idx.push(i);
-                let val = *self.at(curr_md_idx);
+                let val = self.at(curr_md_idx);
                 curr_md_idx.pop();
 
-                write!(f, "{:.4}", val)?;
+                T::fmt_val(val, f)?;
                 if i < dim_size - 1 {
                     write!(f, ", ")?;
                 }

@@ -1,5 +1,4 @@
 use crate::core::GraphTensor;
-use crate::core::tensor::AbstractTensor;
 
 pub trait Module {
     fn for_each_param(&self, f: &mut dyn FnMut(&str, &GraphTensor)) {

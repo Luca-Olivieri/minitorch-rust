@@ -1,0 +1,243 @@
+//! Compile-time element conversions, in three independent tiers.
+//!
+//! Every conversion is a directed impl ("edge") between two dtypes. A
+//! conversion type-checks exactly when its impl exists, so an absent edge is a
+//! compile error rather than a runtime decision. The tiers differ only in
+//! failure semantics:
+//!
+//! | Tier | Trait | Fails? | Compiled when |
+//! |---|---|---|---|
+//! | exact | [`CastFrom`] | never | always |
+//! | lossy | [`LossyCastFrom`] | never (total, rounds) | `allow_lossy_casts` |
+//! | dangerous | [`DangerousCastFrom`] | panics | `allow_dangerous_casts` |
+//!
+//! `allow_lossy_casts` and `allow_dangerous_casts` are independent cargo
+//! features: neither implies the other.
+//!
+//! Edge tables are declared with macros below so that a new dtype is added in
+//! one place (its family impl plus its edges per tier); the compiler then flags
+//! any competing pair as a coherence conflict.
+//!
+//! Every cast body is intentionally an `as` cast: truncation, sign loss and
+//! precision loss are the *point* of these conversions. Each edge listed below
+//! is safe by construction (the exact tier only ever widens; the dangerous
+//! tier range-checks before casting), so the pedantic cast lints are disabled
+//! here.
+
+#![allow(
+    clippy::cast_lossless,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    clippy::float_cmp
+)]
+
+use super::Dtype;
+
+// ---------------------------------------------------------------------------
+// Tier declarations
+// ---------------------------------------------------------------------------
+
+/// Exact, infallible conversion (widening): the result is bit-perfect for
+/// every input. Always compiled.
+pub trait CastFrom<Src: Dtype>: Dtype {
+    fn cast_from(x: Src) -> Self;
+}
+
+/// Lossy but total conversion: defined for every input, never panics, rounds or
+/// loses detail (`f64 -> f32`, `i64 -> f64`, `i32 -> bool`, overflows to ±inf).
+///
+/// Compiled only with the `allow_lossy_casts` cargo feature. When the feature
+/// is off this trait — and every impl below — is absent from the crate.
+#[cfg(feature = "allow_lossy_casts")]
+pub trait LossyCastFrom<Src: Dtype>: Dtype {
+    fn lossy_cast_from(x: Src) -> Self;
+}
+
+/// Partial "dangerous" conversion: panics whenever `x` falls outside the
+/// target's domain (fractional, `NaN`, infinite, or out of range — e.g.
+/// `(u8) 300.0`, `(i32) 5.5`, `(i32) -1.0`).
+///
+/// Compiled only with the `allow_dangerous_casts` cargo feature. When the
+/// feature is off this trait — and every impl below — is absent from the crate.
+#[cfg(feature = "allow_dangerous_casts")]
+pub trait DangerousCastFrom<Src: Dtype>: Dtype {
+    fn dangerous_cast_from(x: Src) -> Self;
+}
+
+// ---------------------------------------------------------------------------
+// Exact tier (always compiled)
+// ---------------------------------------------------------------------------
+
+macro_rules! identity_casts {
+    ($($t:ty),+ $(,)?) => {
+        $(
+            impl CastFrom<$t> for $t {
+                #[inline(always)]
+                fn cast_from(x: $t) -> $t { x }
+            }
+        )+
+    };
+}
+
+identity_casts!(bool, i8, i16, i32, i64, u8, u16, u32, u64, f32, f64);
+
+macro_rules! exact_bool_casts {
+    ($( $dst:ty ),+ $(,)?) => {
+        $(
+            impl CastFrom<bool> for $dst {
+                #[inline(always)]
+                fn cast_from(x: bool) -> $dst { x as u8 as $dst }
+            }
+        )+
+    };
+}
+
+// Bit-width closure: an edge exists iff every source value is exactly
+// representable in the target (int mantissas fit, floats widen).
+exact_bool_casts!(i8, i16, i32, i64, u8, u16, u32, u64, f32, f64);
+
+macro_rules! exact_casts {
+    ($( $src:ty => $($dst:ty),+ );+ $(;)?) => {
+        $(
+            $(
+                impl CastFrom<$src> for $dst {
+                    #[inline(always)]
+                    fn cast_from(x: $src) -> $dst { x as $dst }
+                }
+            )+
+        )+
+    };
+}
+
+exact_casts! {
+    i8   => i16, i32, i64, f32, f64;
+    i16  => i32, i64, f32, f64;
+    i32  => i64, f64;
+    u8   => i16, i32, i64, u16, u32, u64, f32, f64;
+    u16  => i32, i64, u32, u64, f32, f64;
+    u32  => i64, u64, f64;
+    f32  => f64;
+}
+
+// ---------------------------------------------------------------------------
+// Lossy tier (feature `allow_lossy_casts`)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "allow_lossy_casts")]
+macro_rules! lossy_round_casts {
+    ($( $src:ty => $($dst:ty),+ );+ $(;)?) => {
+        $(
+            $(
+                impl LossyCastFrom<$src> for $dst {
+                    #[inline(always)]
+                    fn lossy_cast_from(x: $src) -> $dst { x as $dst }
+                }
+            )+
+        )+
+    };
+}
+
+#[cfg(feature = "allow_lossy_casts")]
+lossy_round_casts! {
+    i32 => f32;
+    i64 => f32, f64;
+    u32 => f32;
+    u64 => f32, f64;
+    f64 => f32;
+}
+
+// int -> bool / float -> bool: total (`x != 0`). `as` cannot target `bool`,
+// so a dedicated body is used.
+#[cfg(feature = "allow_lossy_casts")]
+macro_rules! lossy_to_bool {
+    ($( $src:ty ),+ $(,)?) => {
+        $(
+            impl LossyCastFrom<$src> for bool {
+                #[inline(always)]
+                fn lossy_cast_from(x: $src) -> bool { x != <$src>::default() }
+            }
+        )+
+    };
+}
+
+#[cfg(feature = "allow_lossy_casts")]
+lossy_to_bool!(i8, i16, i32, i64, u8, u16, u32, u64, f32, f64);
+
+// ---------------------------------------------------------------------------
+// Dangerous tier (feature `allow_dangerous_casts`)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "allow_dangerous_casts")]
+macro_rules! dangerous_int_casts {
+    ($( $src:ty => $($dst:ty),+ );+ $(;)?) => {
+        $(
+            $(
+                impl DangerousCastFrom<$src> for $dst {
+                    #[inline(always)]
+                    fn dangerous_cast_from(x: $src) -> $dst {
+                        let Some(v) = <$dst>::try_from(x).ok() else {
+                            panic!(
+                                "dangerous cast {} -> {}: value {} is out of range",
+                                stringify!($src),
+                                stringify!($dst),
+                                x,
+                            );
+                        };
+                        v
+                    }
+                }
+            )+
+        )+
+    };
+}
+
+// Complement of the exact tier: cross-sign and narrowing int-to-int edges.
+#[cfg(feature = "allow_dangerous_casts")]
+dangerous_int_casts! {
+    i8  => u8, u16, u32, u64;
+    i16 => i8, u8, u16, u32, u64;
+    i32 => i8, i16, u8, u16, u32, u64;
+    i64 => i8, i16, i32, u8, u16, u32, u64;
+    u8  => i8;
+    u16 => i8, i16, u8;
+    u32 => i8, i16, i32, u8, u16;
+    u64 => i8, i16, i32, i64, u8, u16, u32;
+}
+
+#[cfg(feature = "allow_dangerous_casts")]
+macro_rules! dangerous_float_int_casts {
+    ($( $src:ty => $($dst:ty),+ );+ $(;)?) => {
+        $(
+            $(
+                impl DangerousCastFrom<$src> for $dst {
+                    #[inline(always)]
+                    fn dangerous_cast_from(x: $src) -> $dst {
+                        if x.is_finite() && x.fract() == 0.0 {
+                            let widened = x as i128;
+                            if widened >= <$dst>::MIN as i128 && widened <= <$dst>::MAX as i128 {
+                                return widened as $dst;
+                            }
+                        }
+                        panic!(
+                            "dangerous cast {} -> {}: value {} must be a finite, integral number in range",
+                            stringify!($src),
+                            stringify!($dst),
+                            x,
+                        );
+                    }
+                }
+            )+
+        )+
+    };
+}
+
+// `i128` as the bridge type: it fits every in-range integer target and gives
+// correct overflow/underflow checks even for values near `u64::MAX` that `f64`
+// cannot represent exactly.
+#[cfg(feature = "allow_dangerous_casts")]
+dangerous_float_int_casts! {
+    f32 => i8, i16, i32, i64, u8, u16, u32, u64;
+    f64 => i8, i16, i32, i64, u8, u16, u32, u64;
+}

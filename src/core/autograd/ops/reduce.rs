@@ -1,5 +1,9 @@
-use crate::core::autograd::grad_fn::*;
-use crate::core::tensor::{AbstractTensor, GraphTensor};
+use crate::core::{
+    GraphTensor,
+    autograd::grad_fn::*,
+    dtype::Numeric,
+    tensor::AbstractTensor,
+};
 
 // There is a single Sum op that reduces an arbitrary subset of dimensions; summing
 // over all dimensions or a single dimension are just special cases of it. `dims` are
@@ -11,15 +15,13 @@ pub struct SumOp {
     pub keepdim: bool,
 }
 
-pub type BackwardSum = NBackwardOp<SumOp, 1>;
-
-impl GradRule<1> for SumOp {
+impl<T: Numeric> GradRule<1, T> for SumOp {
     fn compute_grad(
         &self,
-        operands: &[GraphTensor; 1],
-        in_grad: &GraphTensor,
+        operands: &[GraphTensor<T>; 1],
+        in_grad: &GraphTensor<T>,
         _retain_graph: bool,
-        out: &mut Vec<Option<GraphTensor>>,
+        out: &mut Vec<Option<GraphTensor<T>>>,
     ) {
         out.push(operands[0].requires_grad().then(|| {
             // Gradient of a sum is the upstream gradient replicated over every
@@ -46,15 +48,13 @@ pub struct MaxOp {
     pub keepdim: bool,
 }
 
-pub type BackwardMax = NBackwardOp<MaxOp, 1>;
-
-impl GradRule<1> for MaxOp {
+impl<T: Numeric> GradRule<1, T> for MaxOp {
     fn compute_grad(
         &self,
-        operands: &[GraphTensor; 1],
-        in_grad: &GraphTensor,
+        operands: &[GraphTensor<T>; 1],
+        in_grad: &GraphTensor<T>,
         _retain_graph: bool,
-        out: &mut Vec<Option<GraphTensor>>,
+        out: &mut Vec<Option<GraphTensor<T>>>,
     ) {
         let input = &operands[0];
         let shape = input.shape();

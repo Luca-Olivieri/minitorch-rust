@@ -1,20 +1,27 @@
+use crate::core::dtype::Dtype;
 use crate::core::storage::TensorStorage;
 use crate::core::storage::iter::StridedIter;
 
-pub fn apply_op<F, const N: usize>(operands: &[&TensorStorage; N], op: F) -> TensorStorage
+/// Elementwise application producing a fresh buffer. Input elements are `T`, the
+/// output elements `U`; operations that change dtype (bool masks, one-hot) pass
+/// a different `U`, while arithmetic keeps `U = T`.
+pub fn apply_op<T: Dtype, U: Dtype, F, const N: usize>(
+    operands: &[&TensorStorage<T>; N],
+    op: F,
+) -> TensorStorage<U>
 where
-    F: Fn(&[f64; N]) -> f64,
+    F: Fn(&[T; N]) -> U,
 {
     let first = operands[0];
 
     // capacity == numel, so the pushes below never reallocate.
-    let mut out_buf = Vec::with_capacity(first.numel);
+    let mut out_buf = Vec::<U>::with_capacity(first.numel);
 
     if operands.iter().all(|o| o.contiguous) {
         // contiguous fast path: logical index == flat index (+ offset)
         let offsets: [usize; N] = std::array::from_fn(|j| operands[j].offset);
         for i in 0..first.numel {
-            let vals: [f64; N] = std::array::from_fn(|j| operands[j].buffer[offsets[j] + i]);
+            let vals: [T; N] = std::array::from_fn(|j| operands[j].buffer[offsets[j] + i]);
             out_buf.push(op(&vals));
         }
     } else if let Some(run) = common_inner_run(operands) {
@@ -44,7 +51,7 @@ where
         for _ in 0..outer_numel {
             let bases: [usize; N] = std::array::from_fn(|j| iters[j].next().unwrap());
             for i in 0..run {
-                let vals: [f64; N] = std::array::from_fn(|j| operands[j].buffer[bases[j] + i]);
+                let vals: [T; N] = std::array::from_fn(|j| operands[j].buffer[bases[j] + i]);
                 out_buf.push(op(&vals));
             }
         }
@@ -57,7 +64,7 @@ where
             (!operands[j].contiguous).then(|| operands[j].strided_indices())
         });
         for i in 0..first.numel {
-            let vals: [f64; N] = std::array::from_fn(|j| match &mut iters[j] {
+            let vals: [T; N] = std::array::from_fn(|j| match &mut iters[j] {
                 Some(it) => operands[j].buffer[it.next().unwrap()],
                 None => operands[j].buffer[offsets[j] + i],
             });
@@ -75,7 +82,7 @@ where
 /// Returns `None` when the common run is only 1 flat element, i.e. some operand
 /// has a non-1 innermost stride (e.g. a transposed view), where the odometer
 /// path below is the best we can do.
-fn common_inner_run(operands: &[&TensorStorage]) -> Option<usize> {
+fn common_inner_run<T: Dtype>(operands: &[&TensorStorage<T>]) -> Option<usize> {
     let shape = &operands[0].shape;
     if shape.is_empty() {
         return None;
