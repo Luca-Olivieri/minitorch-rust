@@ -1,4 +1,4 @@
-use crate::core::dtype::{Float, Numeric};
+use crate::core::dtype::{Float, Numeric, Signed};
 use crate::core::storage::TensorStorage;
 
 impl<T: Numeric> TensorStorage<T> {
@@ -68,15 +68,22 @@ impl<T: Numeric> TensorStorage<T> {
     }
 }
 
-impl<T: Float> TensorStorage<T> {
-    // neg/abs need a signed notion (undefined for unsigned integers) and
-    // pow/ln/exp/sqrt are transcendental, so they are float-only.
+impl<T: Signed> TensorStorage<T> {
+    // `neg` needs a signed notion (undefined for unsigned integers), so it
+    // lives on `Signed` (floats and signed integers).
     impl_storage_elemwise_ops!(TensorStorage<T>;
         neg,     (a), -a;
+    );
+}
+
+impl<T: Float> TensorStorage<T> {
+    // `abs` is reachable only from float ops today (kept float-only); and
+    // pow/ln/exp/sqrt are transcendental, so float-only.
+    impl_storage_elemwise_ops!(TensorStorage<T>;
+        abs,     (a), a.abs();
         pow,     (b, e), b.powf(e);
         ln,     (a), a.ln();
         exp,     (a), a.exp();
-        abs,     (a), a.abs();
         sqrt,     (a), a.sqrt();
     );
 }

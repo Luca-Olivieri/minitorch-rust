@@ -1,10 +1,6 @@
 use std::rc::Rc;
 
-use crate::core::autograd::grad_fn::GradFnTrait;
-use crate::core::autograd::grad_fn::NBackwardOp;
-use crate::core::autograd::ops::shape::{
-    BroadcastOp, ExpandOp, SqueezeOp, TransposeOp, UnsqueezeOp,
-};
+use crate::core::autograd::grad_fn::{BackwardOpKind, BackwardSource};
 use crate::core::dtype::{Dtype, Numeric};
 use crate::core::node::TensorNode;
 use crate::core::storage::TensorStorage;
@@ -17,10 +13,10 @@ impl<T: Numeric> GraphTensor<T> {
         apply_tensor_op(
             |ops: &[&TensorStorage<T>; 1]| TensorStorage::unsqueeze(ops[0], dim),
             Some(|operands: [GraphTensor<T>; 1]| {
-                Box::new(NBackwardOp::<UnsqueezeOp, 1, T> {
-                    operands,
-                    op: UnsqueezeOp { dim },
-                }) as Box<dyn GradFnTrait<T>>
+                Box::new(BackwardSource::new(
+                    operands.iter().map(|o| o.copy_s()).collect(),
+                    BackwardOpKind::UnsqueezeOp { dim },
+                ))
             }),
             &[self],
         )
@@ -30,10 +26,10 @@ impl<T: Numeric> GraphTensor<T> {
         apply_tensor_op(
             |ops: &[&TensorStorage<T>; 1]| TensorStorage::squeeze(ops[0], dim),
             Some(|operands: [GraphTensor<T>; 1]| {
-                Box::new(NBackwardOp::<SqueezeOp, 1, T> {
-                    operands,
-                    op: SqueezeOp { dim },
-                }) as Box<dyn GradFnTrait<T>>
+                Box::new(BackwardSource::new(
+                    operands.iter().map(|o| o.copy_s()).collect(),
+                    BackwardOpKind::SqueezeOp { dim },
+                ))
             }),
             &[self],
         )
@@ -43,10 +39,10 @@ impl<T: Numeric> GraphTensor<T> {
         apply_tensor_op(
             |ops: &[&TensorStorage<T>; 1]| TensorStorage::transpose(ops[0], dim_a, dim_b),
             Some(|operands: [GraphTensor<T>; 1]| {
-                Box::new(NBackwardOp::<TransposeOp, 1, T> {
-                    operands,
-                    op: TransposeOp { dim_a, dim_b },
-                }) as Box<dyn GradFnTrait<T>>
+                Box::new(BackwardSource::new(
+                    operands.iter().map(|o| o.copy_s()).collect(),
+                    BackwardOpKind::TransposeOp { dim_a, dim_b },
+                ))
             }),
             &[self],
         )
@@ -56,10 +52,10 @@ impl<T: Numeric> GraphTensor<T> {
         apply_tensor_op(
             |ops: &[&TensorStorage<T>; 1]| TensorStorage::expand(ops[0], dim, times),
             Some(|operands: [GraphTensor<T>; 1]| {
-                Box::new(NBackwardOp::<ExpandOp, 1, T> {
-                    operands,
-                    op: ExpandOp { dim },
-                }) as Box<dyn GradFnTrait<T>>
+                Box::new(BackwardSource::new(
+                    operands.iter().map(|o| o.copy_s()).collect(),
+                    BackwardOpKind::ExpandOp { dim },
+                ))
             }),
             &[self],
         )
@@ -73,11 +69,12 @@ impl<T: Numeric> GraphTensor<T> {
         apply_tensor_op(
             |ops: &[&TensorStorage<T>; 1]| TensorStorage::broadcast_to_shape(ops[0], target_shape),
             Some(|operands: [GraphTensor<T>; 1]| {
-                let old_shape = operands[0].shape().clone();
-                Box::new(NBackwardOp::<BroadcastOp, 1, T> {
-                    operands,
-                    op: BroadcastOp { old_shape },
-                }) as Box<dyn GradFnTrait<T>>
+                Box::new(BackwardSource::new(
+                    operands.iter().map(|o| o.copy_s()).collect(),
+                    BackwardOpKind::BroadcastOp {
+                        old_shape: operands[0].shape().clone(),
+                    },
+                ))
             }),
             &[self],
         )

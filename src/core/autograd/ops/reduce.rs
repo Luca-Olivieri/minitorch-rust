@@ -66,8 +66,9 @@ impl<T: Numeric> GradRule<1, T> for MaxOp {
         }
 
         // mask of the elements that reach the max (a >= max(value)); no element
-        // can exceed it
-        let mask = input.gte(&max_val);
+        // can exceed it. The mask is `bool`; the gradient math runs in `T`, so
+        // it is re-interpreted as 1/0 via `as_numeric::<T>()`.
+        let mask = input.gte(&max_val).as_numeric::<T>();
 
         // broadcast the upstream gradient back to the input shape; with keepdim
         // the reduced axes are already present (size 1) in `in_grad`

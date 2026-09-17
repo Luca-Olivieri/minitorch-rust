@@ -6,6 +6,8 @@
 //! - [`Dtype`] — base marker; implemented for every supported scalar type.
 //! - [`Numeric`] — arithmetic-capable types (`+ - * /`): [`Float`] and
 //!   [`Integer`].
+//! - [`Signed`] — members of [`Numeric`] that support negation ([`Float`]
+//!   and the signed integers): `neg` and the differentiable `sub`/`div`.
 //! - [`Float`] — IEEE 754 floats (`f32`, `f64`).
 //! - [`Integer`] — signed and unsigned integers (`i8`…`i64`, `u8`…`u64`).
 //!
@@ -73,12 +75,22 @@ pub trait Numeric:
     const ONE: Self;
 }
 
+/// Signed-capable arithmetic family: the members of [`Numeric`] that support
+/// negation — [`Float`] and the signed integers. `bool` and unsigned integers
+/// are excluded (`neg` on an unsigned value is undefined).
+///
+/// `neg` and the differentiable `sub`/`div` are gated on this family: the
+/// forward math is well-defined for any signed type, and their backward rules
+/// negate a gradient (`-grad`), which requires `Neg`.
+#[allow(private_bounds)]
+pub trait Signed: Numeric + std::ops::Neg<Output = Self> {}
+
 /// IEEE 754 floating-point family.
 ///
 /// Future members (not currently required, and not std types today):
 /// - half precision `f16`, bfloat16 `bf16` — would need custom scalar types.
 #[allow(private_bounds)]
-pub trait Float: Numeric + std::ops::Neg<Output = Self> {
+pub trait Float: Signed {
     /// Reinterpret a float as an `f64` (exact: floats only ever widen).
     #[doc(hidden)]
     fn to_f64(self) -> f64;
@@ -99,12 +111,9 @@ pub trait Float: Numeric + std::ops::Neg<Output = Self> {
 
 /// Signed and unsigned integer family.
 ///
-/// Future split (not currently required):
-/// - `SignedInteger: Integer` / `UnsignedInteger: Integer` — the ops that
-///   genuinely need signedness are `neg`/`abs` (undefined for unsigned) and
-///   the differentiable `sub`/`div` (whose backward math negates the gradient).
-///   They are therefore currently gated on [`Float`], and would be widened to
-///   a `SignedInteger` family if one is added.
+/// Signed integers additionally satisfy [`Signed`], gaining `neg` and the
+/// differentiable `sub`/`div`; unsigned integers do not, since negation is
+/// undefined for them (mirroring PyTorch, where `torch.neg` rejects uints).
 #[allow(private_bounds)]
 pub trait Integer: Numeric {}
 
@@ -147,8 +156,17 @@ macro_rules! impl_integer_family {
     };
 }
 
+macro_rules! impl_signed {
+    ($($t:ty),+ $(,)?) => {
+        $(
+            impl Signed for $t {}
+        )+
+    };
+}
+
 impl_float_family!(f32, f64);
 impl_integer_family!(i8, i16, i32, i64, u8, u16, u32, u64);
+impl_signed!(f32, f64, i8, i16, i32, i64);
 
 /// Internal per-element rendering used by tensor `Display` impls.
 ///

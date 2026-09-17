@@ -31,16 +31,69 @@ fn int_add_mul_and_broadcast() {
 }
 
 #[test]
-fn int_comparison_masks() {
+fn int_sub_div_neg() {
+    let a = GraphTensor::<i32>::wrap(vec![10, 20, 30, 40], false);
+    let b = GraphTensor::<i32>::wrap(vec![1, 2, 3, 4], false);
+
+    assert_eq!(*(&a - &b).at(&[3]), 36);
+    assert_eq!(*(-&a).at(&[0]), -10);
+    assert_eq!(*(-&a).at(&[3]), -40);
+
+    // Integer division truncates toward zero, matching Rust/NumPy.
+    assert_eq!(*(&a / &b).at(&[0]), 10);
+    assert_eq!(*(&a / &b).at(&[2]), 10);
+
+    // Scalar forms take the tensor's own dtype `T` (no cross-dtype coercion).
+    assert_eq!(*((&a - 5)).at(&[1]), 15);
+    assert_eq!(*((&a / 4)).at(&[3]), 10);
+}
+
+#[test]
+fn int_sub_neg_carry_graph_edges() {
+    // Signed ints build the same differentiable graph structure as floats;
+    // a backward *run* still only exists for `T: Float`.
+    let a = GraphTensor::<i64>::wrap(vec![5, -7], true);
+    let neg = -&a;
+    let diff = &neg - &GraphTensor::<i64>::wrap(1, false);
+    assert!(neg.requires_grad());
+    assert!(diff.requires_grad());
+}
+
+#[test]
+fn unsigned_sub_div() {
+    // Unsigned ints gained forward-only sub/div via the deferred-dispatch
+    // refactor: these build forward edges (no GradRule bound needed), but a
+    // backward pass only ever exists for floats. sub wraps mod 2^N; div
+    // truncates toward zero (Rust/NumPy semantics), like PyTorch uint ops.
+    let a = GraphTensor::<u8>::wrap(vec![10, 20, 30, 40], false);
+    let b = GraphTensor::<u8>::wrap(vec![1, 2, 3, 4], false);
+
+    assert_eq!(*(&a - &b).at(&[3]), 36);
+    assert_eq!(*(&a / &b).at(&[0]), 10);
+    assert_eq!(*(&a / &b).at(&[2]), 10);
+
+    // Scalar forms take the tensor's own dtype `T` (no cross-dtype coercion).
+    assert_eq!(*((&a - 1)).at(&[0]), 9);
+    assert_eq!(*((&a / 8)).at(&[1]), 2);
+
+    // Unsigned tensors carry the same differentiable graph structure as signed
+    // ones (a rule is only materialized for a backward run, never for ints).
+    let u = GraphTensor::<u32>::wrap(vec![7], true);
+    let d = &u - &GraphTensor::<u32>::wrap(3, false);
+    assert!(d.requires_grad());
+}
+
+#[test]
+fn int_comparison_masks_are_bool() {
     let a = GraphTensor::<i32>::wrap(vec![1, 5, 3, 8], false);
     let b = GraphTensor::<i32>::wrap(4, false);
 
-    assert_eq!(*a.gt(&b).at(&[0]), 0);
-    assert_eq!(*a.gt(&b).at(&[1]), 1);
-    assert_eq!(*a.gte(&b).at(&[2]), 0);
-    assert_eq!(*a.lt(&b).at(&[3]), 0);
-    assert_eq!(*a.lte(&b).at(&[3]), 0);
-    assert_eq!(*a.lte(&b).at(&[0]), 1);
+    assert_eq!(*a.gt(&b).at(&[0]), false);
+    assert_eq!(*a.gt(&b).at(&[1]), true);
+    assert_eq!(*a.gte(&b).at(&[2]), false);
+    assert_eq!(*a.lt(&b).at(&[3]), false);
+    assert_eq!(*a.lte(&b).at(&[3]), false);
+    assert_eq!(*a.lte(&b).at(&[0]), true);
 }
 
 #[test]
@@ -189,6 +242,43 @@ fn typed_labels_feed_f64_loss_pipeline() {
     assert_eq!(*dlogits.at(&[1, 2]), -1.0 / 9.0);
     assert_eq!(*dlogits.at(&[2, 1]), -1.0 / 9.0);
     assert_eq!(*dlogits.at(&[0, 2]), 0.0);
+}
+
+#[test]
+fn bool_masks_reinterpret_and_widen() {
+    let a = GraphTensor::<i32>::wrap(vec![1, 5, 3, 8], false);
+    let b = GraphTensor::<i32>::wrap(4, false);
+
+    let mask = a.gt(&b);
+    assert_shape(&mask, &[4]);
+    assert_eq!(*mask.at(&[0]), false);
+    assert_eq!(*mask.at(&[1]), true);
+
+    let as_mask = mask.as_numeric::<i32>();
+    assert_eq!(*as_mask.at(&[0]), 0);
+    assert_eq!(*as_mask.at(&[1]), 1);
+
+    let widened = mask.cast::<f64>();
+    assert_eq!(*widened.at(&[0]), 0.0);
+    assert_eq!(*widened.at(&[1]), 1.0);
+}
+
+#[test]
+fn maximum_backward_through_bool_mask() {
+    let a = GraphTensor::<f64>::wrap(vec![1.0, 5.0, 3.0], true);
+    let b = GraphTensor::<f64>::wrap(vec![4.0, 4.0, 4.0], true);
+
+    let out = GraphTensor::maximum(&a, &b).sum(&[], false);
+    let grads = out.backward(true);
+    let da = grads.get(&a.to_key()).unwrap();
+    let db = grads.get(&b.to_key()).unwrap();
+
+    assert_eq!(*da.at(&[0]), 0.0);
+    assert_eq!(*da.at(&[1]), 1.0);
+    assert_eq!(*da.at(&[2]), 0.0);
+    assert_eq!(*db.at(&[0]), 1.0);
+    assert_eq!(*db.at(&[1]), 0.0);
+    assert_eq!(*db.at(&[2]), 1.0);
 }
 
 #[test]

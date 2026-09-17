@@ -1,15 +1,168 @@
 use std::fmt;
 
+use crate::core::autograd::ops::math::{
+    AddOp, DivOp, ExpOp, LnOp, MatmulOp, MaximumOp, MulOp, NegOp, PowOp, SqrtOp, SubOp,
+};
+use crate::core::autograd::ops::reduce::{MaxOp, SumOp};
+use crate::core::autograd::ops::shape::{
+    BroadcastOp, CopyDOp, ExpandOp, SqueezeOp, TransposeOp, UnsqueezeOp,
+};
 use crate::core::{
     GraphTensor,
-    dtype::{Dtype, Numeric},
+    dtype::{Dtype, Float, Numeric},
     tensor::{AbstractTensor, TensorNodeAccess},
 };
 
+/// Deferred gradient source for a forward node.
+///
+/// A forward op records only its operands and an op *marker* — building the
+/// edge requires no [`GradRule`] bound at all. That is the whole point: the
+/// forward home of an op (e.g. `sub` on every [`Numeric`]) is decoupled from
+/// what its backward math needs (a [`GradRule`] bound like `T: Signed`).
+///
+/// The concrete rule is materialized — [`BackwardSource::into_grad_fn`] — only
+/// at backward-build time, when `T: Float` is known and every rule's
+/// `Numeric`/`Signed`/`Float` bound is satisfiable.
+pub(crate) struct BackwardSource<T: Dtype = f64> {
+    operands: Vec<GraphTensor<T>>,
+    op: BackwardOpKind,
+}
+
+impl<T: Dtype> Clone for BackwardSource<T> {
+    fn clone(&self) -> Self {
+        Self {
+            operands: self.operands.iter().map(|o| o.copy_s()).collect(),
+            op: self.op.clone(),
+        }
+    }
+}
+
+impl<T: Dtype> fmt::Debug for BackwardSource<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // GraphTensor's Debug needs a styler bound; print counts instead so the
+        // node-level Debug impl stays usable for every dtype.
+        f.debug_struct("BackwardSource")
+            .field("op", &self.op)
+            .field("operands", &self.operands.len())
+            .finish()
+    }
+}
+
+impl<T: Dtype> BackwardSource<T> {
+    pub(crate) fn new(operands: Vec<GraphTensor<T>>, op: BackwardOpKind) -> Self {
+        Self { operands, op }
+    }
+
+    pub(crate) fn operands(&self) -> &[GraphTensor<T>] {
+        &self.operands
+    }
+}
+
+/// Marker for the differentiable op an edge records. Parametrized variants hold
+/// the op's own state (e.g. the reduced dims of `sum`). Names mirror the rule
+/// structs in `ops/{math,reduce,shape}.rs` so forward code refers to one ident.
+#[allow(clippy::enum_variant_names)]
+#[derive(Debug, Clone)]
+pub(crate) enum BackwardOpKind {
+    AddOp,
+    MulOp,
+    SubOp,
+    DivOp,
+    NegOp,
+    LnOp,
+    ExpOp,
+    SqrtOp,
+    PowOp,
+    MatmulOp,
+    MaximumOp,
+    SumOp {
+        dims: Vec<usize>,
+        keepdim: bool,
+    },
+    MaxOp {
+        dims: Vec<usize>,
+        keepdim: bool,
+    },
+    CopyDOp,
+    UnsqueezeOp {
+        dim: usize,
+    },
+    SqueezeOp {
+        dim: usize,
+    },
+    TransposeOp {
+        dim_a: usize,
+        dim_b: usize,
+    },
+    ExpandOp {
+        dim: usize,
+    },
+    BroadcastOp {
+        old_shape: Vec<usize>,
+    },
+}
+
+impl<T: Float> BackwardSource<T> {
+    /// Rebuild the concrete `NBackwardOp` (operands + rule struct) the forward
+    /// op would previously have boxed. Backward passes only run for float
+    /// dtypes, so every rule's `Numeric`/`Signed`/`Float` bound holds here.
+    pub(crate) fn into_grad_fn(self) -> Box<dyn GradFnTrait<T>> {
+        fn box_rule<Op, const N: usize, T: Float>(
+            operands: Vec<GraphTensor<T>>,
+            op: Op,
+        ) -> Box<dyn GradFnTrait<T>>
+        where
+            Op: GradRule<N, T> + fmt::Debug + 'static,
+        {
+            let operands: [GraphTensor<T>; N] = match operands.try_into() {
+                Ok(operands) => operands,
+                Err(_) => panic!("BackwardSource operand count must match the op arity"),
+            };
+            Box::new(NBackwardOp { operands, op }) as Box<dyn GradFnTrait<T>>
+        }
+
+        let BackwardSource { operands, op } = self;
+        match op {
+            BackwardOpKind::AddOp => box_rule::<AddOp, 2, T>(operands, AddOp),
+            BackwardOpKind::MulOp => box_rule::<MulOp, 2, T>(operands, MulOp),
+            BackwardOpKind::SubOp => box_rule::<SubOp, 2, T>(operands, SubOp),
+            BackwardOpKind::DivOp => box_rule::<DivOp, 2, T>(operands, DivOp),
+            BackwardOpKind::MaximumOp => box_rule::<MaximumOp, 2, T>(operands, MaximumOp),
+            BackwardOpKind::MatmulOp => box_rule::<MatmulOp, 2, T>(operands, MatmulOp {}),
+            BackwardOpKind::PowOp => box_rule::<PowOp, 2, T>(operands, PowOp),
+            BackwardOpKind::NegOp => box_rule::<NegOp, 1, T>(operands, NegOp),
+            BackwardOpKind::LnOp => box_rule::<LnOp, 1, T>(operands, LnOp),
+            BackwardOpKind::ExpOp => box_rule::<ExpOp, 1, T>(operands, ExpOp),
+            BackwardOpKind::SqrtOp => box_rule::<SqrtOp, 1, T>(operands, SqrtOp),
+            BackwardOpKind::SumOp { dims, keepdim } => {
+                box_rule::<SumOp, 1, T>(operands, SumOp { dims, keepdim })
+            }
+            BackwardOpKind::MaxOp { dims, keepdim } => {
+                box_rule::<MaxOp, 1, T>(operands, MaxOp { dims, keepdim })
+            }
+            BackwardOpKind::CopyDOp => box_rule::<CopyDOp, 1, T>(operands, CopyDOp {}),
+            BackwardOpKind::UnsqueezeOp { dim } => {
+                box_rule::<UnsqueezeOp, 1, T>(operands, UnsqueezeOp { dim })
+            }
+            BackwardOpKind::SqueezeOp { dim } => {
+                box_rule::<SqueezeOp, 1, T>(operands, SqueezeOp { dim })
+            }
+            BackwardOpKind::TransposeOp { dim_a, dim_b } => {
+                box_rule::<TransposeOp, 1, T>(operands, TransposeOp { dim_a, dim_b })
+            }
+            BackwardOpKind::ExpandOp { dim } => box_rule::<ExpandOp, 1, T>(operands, ExpandOp { dim }),
+            BackwardOpKind::BroadcastOp { old_shape } => {
+                box_rule::<BroadcastOp, 1, T>(operands, BroadcastOp { old_shape })
+            }
+        }
+    }
+}
+
 /// Generic backward-op container: stores operands, arity N, the operation state,
 /// and the dtype `T` of the operands. Autograd only ever *runs* for float dtypes
-/// (see `impl<T: Float> GraphTensor<T>`), but the container is generic so other
-/// dtypes participate in the same forward graph machinery.
+/// (see `impl<T: Float> GraphTensor<T>`), and `BackwardSource` freezes *building*
+/// an edge independently of any rule — but the concrete `NBackwardOp` is produced
+/// by [`BackwardSource::into_grad_fn`] at backward time.
 pub struct NBackwardOp<Op, const N: usize, T: Dtype = f64> {
     pub(crate) operands: [GraphTensor<T>; N],
     pub(crate) op: Op, // Holds the actual struct (and its fields like `dim`)

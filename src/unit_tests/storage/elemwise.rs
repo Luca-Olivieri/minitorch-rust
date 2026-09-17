@@ -49,13 +49,13 @@ fn sum_and_max_on_ints() {
 }
 
 #[test]
-fn comparisons_yield_masks_in_input_dtype() {
+fn comparisons_yield_bool_masks() {
     let a = TensorStorage::from_buffer(vec![4], vec![1i32, 5, 3, 8]);
     let b = TensorStorage::from_buffer(vec![4], vec![2i32, 5, 9, 3]);
     let gt = TensorStorage::gt(&[&a, &b]);
     let lte = TensorStorage::lte(&[&a, &b]);
-    assert_eq!(gt.buffer.as_ref(), &[0i32, 0, 0, 1]);
-    assert_eq!(lte.buffer.as_ref(), &[1i32, 1, 1, 0]);
+    assert_eq!(gt.buffer.as_ref(), &[false, false, false, true]);
+    assert_eq!(lte.buffer.as_ref(), &[true, true, true, false]);
 }
 
 #[test]
@@ -63,7 +63,7 @@ fn is_close_matches_torch_semantics_on_f64() {
     let a = TensorStorage::from_buffer(vec![3], vec![1.0, 2.0, 1e10]);
     let b = TensorStorage::from_buffer(vec![3], vec![1.0 + 1e-8, 2.0 + 1e-4, 1e10 + 1.0]);
     let out = TensorStorage::is_close(&a, &b, 1e-5, 1e-8);
-    assert_eq!(out.buffer.as_ref(), &[1.0, 0.0, 1.0]);
+    assert_eq!(out.buffer.as_ref(), &[true, false, true]);
 }
 
 #[test]

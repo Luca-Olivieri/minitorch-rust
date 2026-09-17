@@ -1,31 +1,29 @@
 use crate::core::dtype::{Float, Numeric};
 use crate::core::storage::TensorStorage;
+use crate::core::storage::ops::utils::apply_op;
 
 impl<T: Numeric> TensorStorage<T> {
-    // Comparisons yield a 1/0 mask **in the input dtype** (T::ONE/T::ZERO), so
-    // they stay closed over the tensor's dtype: no silent lossy promotion to
-    // f64. On the f64 path this is exactly the old `1.0`/`0.0` behavior.
-    impl_storage_elemwise_ops!(TensorStorage<T>;
-        gt,     (a, b), if a > b { T::ONE } else { T::ZERO };
-        gte,     (a, b), if a >= b { T::ONE } else { T::ZERO };
-        lt,     (a, b), if a < b { T::ONE } else { T::ZERO };
-        lte,     (a, b), if a <= b { T::ONE } else { T::ZERO };
+    // Comparisons yield a `bool` mask: the operands share the input dtype `T`,
+    // the result is always `bool`. Values combine with numeric tensors through
+    // the exact `bool -> T` cast (`T::cast_from`, always infallible).
+    impl_storage_elemwise_ops!(TensorStorage<T> => bool;
+        gt,     (a, b), a > b;
+        gte,    (a, b), a >= b;
+        lt,     (a, b), a < b;
+        lte,    (a, b), a <= b;
     );
 }
 
 impl<T: Float> TensorStorage<T> {
-    /// out[i] = 1.0 if |a[i] - b[i]| <= atol + rtol * |b[i]|, else 0.0,
-    /// following PyTorch's `torch.isclose` semantics (with `equal_nan = false`).
-    /// The mask uses the input dtype (`T::ONE`/`T::ZERO`); tolerances stay `f64`.
-    pub fn is_close(a: &TensorStorage<T>, b: &TensorStorage<T>, rtol: f64, atol: f64) -> TensorStorage<T> {
-        crate::core::storage::ops::utils::apply_op(&[a, b], |&[av, bv]| {
+    /// out[i] = true if |a[i] - b[i]| <= atol + rtol * |b[i]|, else false,
+    /// following PyTorch's `torch.isclose` semantics (with `equal_nan =
+    /// false`). Operands share the float dtype `T`; the result is `bool`.
+    /// Tolerances stay `f64`.
+    pub fn is_close(a: &TensorStorage<T>, b: &TensorStorage<T>, rtol: f64, atol: f64) -> TensorStorage<bool> {
+        apply_op(&[a, b], |&[av, bv]| {
             let avf = av.to_f64();
             let bvf = bv.to_f64();
-            if (avf - bvf).abs() <= atol + rtol * bvf.abs() {
-                T::ONE
-            } else {
-                T::ZERO
-            }
+            (avf - bvf).abs() <= atol + rtol * bvf.abs()
         })
     }
 }

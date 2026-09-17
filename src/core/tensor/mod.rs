@@ -6,9 +6,7 @@ pub mod ops;
 use std::fmt;
 use std::rc::Rc;
 
-use crate::core::autograd::grad_fn::GradFnTrait;
-use crate::core::autograd::grad_fn::NBackwardOp;
-use crate::core::autograd::ops::shape::CopyDOp;
+use crate::core::autograd::grad_fn::{BackwardOpKind, BackwardSource};
 use crate::core::dtype::{Dtype, DtypeStyler, Numeric};
 use crate::core::node::TensorNode;
 use crate::core::storage::TensorStorage;
@@ -286,10 +284,7 @@ impl<T: Numeric> GraphTensor<T> {
         let storage = TensorStorage::copy_d(&self.node.storage);
         let requires_grad = self.node.requires_grad;
         let grad_fn = requires_grad.then(|| {
-            Box::new(NBackwardOp::<CopyDOp, 1, T> {
-                operands: [self.copy_s()],
-                op: CopyDOp {},
-            }) as Box<dyn GradFnTrait<T>>
+            Box::new(BackwardSource::new(vec![self.copy_s()], BackwardOpKind::CopyDOp))
         });
 
         let node = TensorNode {

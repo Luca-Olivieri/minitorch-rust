@@ -7,6 +7,8 @@ use std::rc::Rc;
 
 use crate::core::{GraphTensor, dtype::{Dtype, Float}, node::TensorNode};
 
+use self::grad_fn::GradFnTrait;
+
 pub struct TensorKey<T: Dtype = f64> {
     node: Rc<TensorNode<T>>, // TODO or use GraphTensor directly
 }
@@ -69,6 +71,11 @@ pub struct BackwardPlan<T: Dtype = f64> {
     nodes: Vec<TensorKey<T>>,
     seed_idx: usize,
     operands: Vec<Vec<usize>>,
+    // Materialized rules: `grad_fns[u]` is the concrete backward op for node
+    // `u`, frozen from its deferred `BackwardSource` at build time (see
+    // `BackwardSource::into_grad_fn`). `run` executes these without touching
+    // the live forward graph.
+    grad_fns: Vec<Option<Box<dyn GradFnTrait<T>>>>,
     is_leaf: Vec<bool>,
     base_in_degree: Vec<usize>,
     grads: Vec<Option<GraphTensor<T>>>,
@@ -82,6 +89,7 @@ impl<T: Float> BackwardPlan<T> {
         let mut nodes: Vec<TensorKey<T>> = Vec::new();
         let mut index_of: HashMap<*const TensorNode<T>, usize> = HashMap::new();
         let mut operands: Vec<Vec<usize>> = Vec::new();
+        let mut grad_fns: Vec<Option<Box<dyn GradFnTrait<T>>>> = Vec::new();
         let mut is_leaf: Vec<bool> = Vec::new();
         let mut bfs_queue: VecDeque<usize> = VecDeque::new();
 
@@ -89,6 +97,7 @@ impl<T: Float> BackwardPlan<T> {
         nodes.push(seed.to_key());
         index_of.insert(Rc::as_ptr(&seed.node), seed_idx);
         operands.push(Vec::new());
+        grad_fns.push(None);
         is_leaf.push(seed.node.grad_fn.is_none());
         bfs_queue.push_back(seed_idx);
 
@@ -100,15 +109,22 @@ impl<T: Float> BackwardPlan<T> {
 
             // Snapshot the operand graph tensors so `nodes` can grow while iterating.
             let op_graphs = {
-                let Some(grad_fn) = &nodes[u].node.grad_fn else {
+                let Some(src) = &nodes[u].node.grad_fn else {
                     continue;
                 };
-                grad_fn
-                    .get_operands()
+                src.operands()
                     .iter()
                     .map(|op| op.copy_s())
                     .collect::<Vec<_>>()
             };
+
+            // Freeze this node's deferred rule into the plan (T: Float here, so
+            // every rule's Numeric/Signed/Float bound is satisfiable).
+            grad_fns[u] = nodes[u]
+                .node
+                .grad_fn
+                .as_ref()
+                .map(|src| (**src).clone().into_grad_fn());
 
             for op in op_graphs.iter() {
                 let ptr = Rc::as_ptr(&op.node);
@@ -119,6 +135,7 @@ impl<T: Float> BackwardPlan<T> {
                         nodes.push(op.to_key());
                         index_of.insert(ptr, v);
                         operands.push(Vec::new());
+                        grad_fns.push(None);
                         is_leaf.push(op.node.grad_fn.is_none());
                         bfs_queue.push_back(v);
                         v
@@ -141,6 +158,7 @@ impl<T: Float> BackwardPlan<T> {
             nodes,
             seed_idx,
             operands,
+            grad_fns,
             is_leaf,
             base_in_degree,
             grads: (0..node_count).map(|_| None).collect(),
@@ -175,7 +193,7 @@ impl<T: Float> BackwardPlan<T> {
                 continue;
             }
 
-            let Some(grad_fn) = &self.nodes[u].node.grad_fn else {
+            let Some(grad_fn) = &self.grad_fns[u] else {
                 continue;
             };
 

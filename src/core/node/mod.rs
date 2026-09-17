@@ -1,4 +1,4 @@
-use crate::core::autograd::grad_fn::GradFnTrait;
+use crate::core::autograd::grad_fn::BackwardSource;
 use crate::core::dtype::Dtype;
 use crate::core::storage::TensorStorage;
 
@@ -6,7 +6,9 @@ use crate::core::storage::TensorStorage;
 pub(crate) struct TensorNode<T: Dtype = f64> {
     pub(crate) storage: TensorStorage<T>,
     pub(crate) requires_grad: bool,
-    pub(crate) grad_fn: Option<Box<dyn GradFnTrait<T>>>,
+    // Deferred gradient source: the rule is materialized (BackwardSource ->
+    // NBackwardOp) only when a backward pass actually runs, i.e. for T: Float.
+    pub(crate) grad_fn: Option<Box<BackwardSource<T>>>,
 }
 
 impl<T: Dtype> TensorNode<T> {

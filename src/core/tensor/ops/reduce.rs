@@ -1,8 +1,6 @@
 use std::rc::Rc;
 
-use crate::core::autograd::grad_fn::GradFnTrait;
-use crate::core::autograd::ops::math::MatmulOp;
-use crate::core::autograd::ops::reduce::{MaxOp, SumOp};
+use crate::core::autograd::grad_fn::{BackwardOpKind, BackwardSource};
 use crate::core::dtype::{Float, Numeric};
 use crate::core::node::TensorNode;
 use crate::core::storage::TensorStorage;
@@ -33,13 +31,13 @@ impl<T: Numeric> GraphTensor<T> {
                 }
             },
             Some(|operands: [GraphTensor<T>; 1]| {
-                Box::new(crate::core::autograd::grad_fn::NBackwardOp::<SumOp, 1, T> {
-                    operands,
-                    op: SumOp {
+                Box::new(BackwardSource::new(
+                    operands.iter().map(|o| o.copy_s()).collect(),
+                    BackwardOpKind::SumOp {
                         dims: dims.clone(),
                         keepdim,
                     },
-                }) as Box<dyn GradFnTrait<T>>
+                ))
             }),
             &[self],
         )
@@ -63,13 +61,13 @@ impl<T: Numeric> GraphTensor<T> {
                 }
             },
             Some(|operands: [GraphTensor<T>; 1]| {
-                Box::new(crate::core::autograd::grad_fn::NBackwardOp::<MaxOp, 1, T> {
-                    operands,
-                    op: MaxOp {
+                Box::new(BackwardSource::new(
+                    operands.iter().map(|o| o.copy_s()).collect(),
+                    BackwardOpKind::MaxOp {
                         dims: dims.clone(),
                         keepdim,
                     },
-                }) as Box<dyn GradFnTrait<T>>
+                ))
             }),
             &[self],
         )
@@ -141,10 +139,10 @@ impl<T: Numeric> GraphTensor<T> {
         // Only attach a grad_fn if at least one operand requires gradients.
         let requires_grad = a.requires_grad() || b.requires_grad();
         let grad_fn = requires_grad.then(|| {
-            Box::new(crate::core::autograd::grad_fn::NBackwardOp::<MatmulOp, 2, T> {
-                operands: [a.copy_s(), b.copy_s()],
-                op: MatmulOp {},
-            }) as Box<dyn GradFnTrait<T>>
+            Box::new(BackwardSource::new(
+                vec![a.copy_s(), b.copy_s()],
+                BackwardOpKind::MatmulOp,
+            ))
         });
 
         let out_node = TensorNode {

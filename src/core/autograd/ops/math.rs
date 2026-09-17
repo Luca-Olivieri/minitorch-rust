@@ -1,17 +1,22 @@
 use crate::core::{
     GraphTensor,
     autograd::grad_fn::*,
-    dtype::{Float, Numeric},
+    dtype::{Float, Numeric, Signed},
     tensor::AbstractTensor,
 };
 
-// The grad-rule for each op lives in the same dtype home as the op itself:
+// The grad-rule for each op is dispatched from `BackwardSource::into_grad_fn`
+// only when a backward run materializes it (T: Float), so the rule's bound is
+// no longer tied to the op's forward home:
 //
-// - Numeric-homed forward ops (add/mul/maximum/matmul) have Numeric-homed rules,
-//   so integer tensors carry the same graph structure even though a backward
-//   *run* only exists for floats.
-// - Float-homed forward ops (neg/ln/exp/sqrt/sub/div/pow) have Float-homed
-//   rules, because their backward math uses float-only ops.
+// - Numeric-homed rules (add/mul/maximum/matmul) are usable for any integer and
+//   float Tensor; integer tensors carry the same forward graph structure even
+//   though a backward *run* only exists for floats.
+// - Signed-homed rules (sub/div/neg) negate a gradient, so they apply to floats
+//   and signed integers — while their forward ops (`sub`/`div`) now live in the
+//   Numeric home and are simply forward-only for unsigned integers.
+// - Float-homed rules (ln/exp/sqrt/pow) use float-only kernels, matching their
+//   Float-homed forward ops.
 
 /// Build a scalar node of dtype `T` from a plain `f64` constant.
 fn scalar<T: Float>(x: f64) -> GraphTensor<T> {
@@ -21,7 +26,7 @@ fn scalar<T: Float>(x: f64) -> GraphTensor<T> {
 #[derive(Debug)]
 pub struct NegOp;
 
-impl<T: Float> GradRule<1, T> for NegOp {
+impl<T: Signed> GradRule<1, T> for NegOp {
     fn compute_grad(
         &self,
         operands: &[GraphTensor<T>; 1],
@@ -198,7 +203,7 @@ impl<T: Numeric> GradRule<2, T> for AddOp {
 #[derive(Debug)]
 pub struct SubOp;
 
-impl<T: Float> GradRule<2, T> for SubOp {
+impl<T: Signed> GradRule<2, T> for SubOp {
     fn compute_grad(
         &self,
         operands: &[GraphTensor<T>; 2],
@@ -243,7 +248,7 @@ impl<T: Numeric> GradRule<2, T> for MulOp {
 #[derive(Debug)]
 pub struct DivOp;
 
-impl<T: Float> GradRule<2, T> for DivOp {
+impl<T: Signed> GradRule<2, T> for DivOp {
     fn compute_grad(
         &self,
         operands: &[GraphTensor<T>; 2],
@@ -310,18 +315,30 @@ impl<T: Numeric> GradRule<2, T> for MaximumOp {
         retain_graph: bool,
         out: &mut Vec<Option<GraphTensor<T>>>,
     ) {
-        // y = max(a, b): gradient flows to whichever operand attained the max
+        // y = max(a, b): gradient flows to whichever operand attained the max.
         //   dy/da = (a >= b), dy/db = (a < b)
+        // Comparisons yield `bool` masks; the gradient math runs in `T`, so the
+        // masks are re-interpreted as 1/0 via `as_numeric::<T>()`.
         let a = &operands[0];
         let b = &operands[1];
 
         out.push(
-            a.requires_grad()
-                .then(|| reduce_grad_to_shape(&(in_grad * &a.gte(b)), a.shape(), retain_graph)),
+            a.requires_grad().then(|| {
+                reduce_grad_to_shape(
+                    &(in_grad * &a.gte(b).as_numeric::<T>()),
+                    a.shape(),
+                    retain_graph,
+                )
+            }),
         );
         out.push(
-            b.requires_grad()
-                .then(|| reduce_grad_to_shape(&(in_grad * &a.lt(b)), b.shape(), retain_graph)),
+            b.requires_grad().then(|| {
+                reduce_grad_to_shape(
+                    &(in_grad * &a.lt(b).as_numeric::<T>()),
+                    b.shape(),
+                    retain_graph,
+                )
+            }),
         );
     }
 }

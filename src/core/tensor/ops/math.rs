@@ -1,21 +1,22 @@
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
-use crate::core::autograd::grad_fn::GradFnTrait;
-use crate::core::autograd::grad_fn::NBackwardOp;
-use crate::core::autograd::ops::math::{
-    AddOp, DivOp, ExpOp, LnOp, MaximumOp, MulOp, NegOp, PowOp, SqrtOp, SubOp,
-};
-use crate::core::dtype::{Dtype, Float, Numeric};
+use crate::core::autograd::grad_fn::BackwardSource;
+use crate::core::dtype::{Dtype, Float, Numeric, Signed};
 use crate::core::storage::TensorStorage;
 use crate::core::tensor::extract_requires_grad;
 use crate::core::tensor::GraphTensor;
 
-// Math ops live in two dtype homes, chosen by what their backward math needs:
+// Math ops live in dtype homes, chosen by what their *forward* kernels need.
+// Forward edges only record a `BackwardSource`, so no op needs a `GradRule`
+// bound to be constructed; the rule is materialized at backward time (T: Float).
 //
-// - Numeric home: add/mul (signed-agnostic, gradient is a broadcast/passthrough)
-//   and maximum (mask-based gradient needs only comparisons).
-// - Float home: sub/div (backward uses neg/div), neg, and the transcendental
-//   pow/ln/exp/sqrt (float-only kernels and derivatives).
+// - Numeric home: add/mul/sub/div (kernels are signed-agnostic, `sub`/`div`
+//   wrap/truncate on integers like PyTorch's uint arithmetic) and maximum
+//   (mask-based gradient).
+// - Signed home: neg (unsigned negation is undefined — std has no `Neg` for
+//   `u8`…`u64`).
+// - Float home: pow/ln/exp/sqrt and norm/dist (float-only kernels and
+//   derivatives).
 
 impl<T: Numeric> GraphTensor<T> {
     impl_tensor_binary_method!(maximum, TensorStorage::maximum, MaximumOp);
@@ -25,7 +26,7 @@ impl<T: Numeric> GraphTensor<T> {
     pub fn sub_scaled(&self, other: &GraphTensor<T>, scale: T) -> GraphTensor<T> {
         apply_tensor_op(
             |ops: &[&TensorStorage<T>; 2]| TensorStorage::sub_scaled(ops[0], ops[1], scale),
-            None::<fn([GraphTensor<T>; 2]) -> Box<dyn GradFnTrait<T>>>,
+            None::<fn([GraphTensor<T>; 2]) -> Box<BackwardSource<T>>>,
             &[self, other],
         )
     }
@@ -34,19 +35,19 @@ impl<T: Numeric> GraphTensor<T> {
 impl_tensor_binary_ops! {
     Numeric, Add, add, TensorStorage::add,  AddOp;
     Numeric, Mul, mul, TensorStorage::mul,  MulOp;
-    Float,   Sub, sub, TensorStorage::sub,  SubOp;
-    Float,   Div, div, TensorStorage::div,  DivOp;
+    Numeric, Sub, sub, TensorStorage::sub,  SubOp;
+    Numeric, Div, div, TensorStorage::div,  DivOp;
 }
 
 impl_tensor_unary_ops! {
-    Float, Neg, neg, TensorStorage::neg, NegOp;
+    Signed, Neg, neg, TensorStorage::neg, NegOp;
 }
 
 impl_tensor_scalar_ops! {
     Numeric, Add, add;
     Numeric, Mul, mul;
-    Float,   Sub, sub;
-    Float,   Div, div;
+    Numeric, Sub, sub;
+    Numeric, Div, div;
 }
 
 impl<T: Float> GraphTensor<T> {
@@ -71,8 +72,63 @@ pub(crate) fn apply_tensor_op<T: Dtype, F, G, const N: usize>(
 ) -> GraphTensor<T>
 where
     F: Fn(&[&TensorStorage<T>; N]) -> TensorStorage<T>,
-    G: FnOnce([GraphTensor<T>; N]) -> Box<dyn GradFnTrait<T>>,
+    G: FnOnce([GraphTensor<T>; N]) -> Box<BackwardSource<T>>,
 {
+    with_broadcast_operands(operands, |storages: &[&TensorStorage<T>; N]| {
+        let out_store = op(storages);
+
+        // Only generate a grad_fn if one was provided
+        let grad_fn_opt = grad_fn.map(|g| {
+            let new_operands: [GraphTensor<T>; N] = std::array::from_fn(|i| operands[i].copy_s());
+            g(new_operands)
+        });
+
+        let out_node = crate::core::node::TensorNode {
+            storage: out_store,
+            requires_grad: extract_requires_grad(operands),
+            grad_fn: grad_fn_opt,
+        };
+
+        GraphTensor {
+            node: std::rc::Rc::new(out_node),
+        }
+    })
+}
+
+/// Dtype-changing elementwise op: operands all share the input dtype `T`, the
+/// result is a new, disconnected `GraphTensor<U>` (no gradient edge — the
+/// writers are comparison masks, i.e. step functions, so nothing is differenti
+/// able here). Used by comparisons `(T, T) -> bool`.
+pub(crate) fn apply_tensor_op_into<T: Dtype, U: Dtype, F, const N: usize>(
+    op: F,
+    operands: &[&GraphTensor<T>; N],
+) -> GraphTensor<U>
+where
+    F: Fn(&[&TensorStorage<T>; N]) -> TensorStorage<U>,
+{
+    with_broadcast_operands(operands, |storages: &[&TensorStorage<T>; N]| {
+        let out_store = op(storages);
+
+        let out_node = crate::core::node::TensorNode {
+            storage: out_store,
+            requires_grad: false,
+            grad_fn: None,
+        };
+
+        GraphTensor {
+            node: std::rc::Rc::new(out_node),
+        }
+    })
+}
+
+/// Broadcast every operand to the common NumPy-style shape, then hand the
+/// prepared storage views to `f`. The broadcast views live in a `Vec` that is
+/// local to this closure, so `f` runs (and produces its result) before they are
+/// dropped.
+fn with_broadcast_operands<T: Dtype, const N: usize, R>(
+    operands: &[&GraphTensor<T>; N],
+    f: impl FnOnce(&[&TensorStorage<T>; N]) -> R,
+) -> R {
     // NumPy-style right-aligned broadcasting: every operand is expanded to a
     // common shape (via stride-0 views) before the storage op runs.
     let target_shape = broadcast_shape(&(*operands).map(|o| o.node.storage.shape.as_slice()));
@@ -82,7 +138,6 @@ where
         .any(|o| o.node.storage.shape != target_shape);
 
     // The broadcast views for operands whose shape differs from the common shape.
-    // Declared here so the references in `storages` below outlive the `if` block.
     let mut owned: Vec<TensorStorage<T>> = Vec::with_capacity(N);
     let storages: [&TensorStorage<T>; N] = if needs_broadcast {
         for o in operands {
@@ -93,23 +148,7 @@ where
         std::array::from_fn(|i| &operands[i].node.storage)
     };
 
-    let out_store = op(&storages);
-
-    // Only generate a grad_fn if one was provided
-    let grad_fn_opt = grad_fn.map(|g| {
-        let new_operands: [GraphTensor<T>; N] = std::array::from_fn(|i| operands[i].copy_s());
-        g(new_operands)
-    });
-
-    let out_node = crate::core::node::TensorNode {
-        storage: out_store,
-        requires_grad: extract_requires_grad(operands),
-        grad_fn: grad_fn_opt,
-    };
-
-    GraphTensor {
-        node: std::rc::Rc::new(out_node),
-    }
+    f(&storages)
 }
 
 // Compute the result shape of broadcasting all the given shapes together,

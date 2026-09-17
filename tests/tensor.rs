@@ -53,17 +53,17 @@ fn is_close_within_tolerance() {
     let a = GraphTensor::wrap(vec![1.0, 1.0, 1.0], false);
     let b = GraphTensor::wrap(vec![0.999999, 1.0, 1.1], false);
     let r = a.is_close(&b);
-    assert_eq!(*r.at(&[0]), 1.0);
-    assert_eq!(*r.at(&[1]), 1.0);
-    assert_eq!(*r.at(&[2]), 0.0);
+    assert_eq!(*r.at(&[0]), true);
+    assert_eq!(*r.at(&[1]), true);
+    assert_eq!(*r.at(&[2]), false);
 }
 
 #[test]
 fn is_close_with_explicit_tolerances() {
     let a = GraphTensor::wrap(vec![10.0], false);
     let b = GraphTensor::wrap(vec![10.0 + 1e-3], false);
-    assert_eq!(*a.is_close(&b).at(&[0]), 0.0);
-    assert_eq!(*a.is_close_with(&b, 1e-4, 0.0).at(&[0]), 1.0);
+    assert_eq!(*a.is_close(&b).at(&[0]), false);
+    assert_eq!(*a.is_close_with(&b, 1e-4, 0.0).at(&[0]), true);
 }
 
 #[test]
@@ -72,9 +72,9 @@ fn is_close_broadcasts() {
     let b = GraphTensor::wrap(1.0, false);
     let r = a.is_close(&b);
     assert_eq!(r.shape(), &[3]);
-    assert_eq!(*r.at(&[0]), 1.0);
-    assert_eq!(*r.at(&[1]), 0.0);
-    assert_eq!(*r.at(&[2]), 0.0);
+    assert_eq!(*r.at(&[0]), true);
+    assert_eq!(*r.at(&[1]), false);
+    assert_eq!(*r.at(&[2]), false);
 }
 
 #[test]
@@ -82,5 +82,5 @@ fn is_close_nan_not_equal() {
     let a = GraphTensor::wrap(vec![f64::NAN], false);
     let b = GraphTensor::wrap(vec![f64::NAN], false);
     let r = a.is_close(&b);
-    assert_eq!(*r.at(&[0]), 0.0);
+    assert_eq!(*r.at(&[0]), false);
 }

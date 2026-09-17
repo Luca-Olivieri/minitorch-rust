@@ -12,7 +12,7 @@
 //! - [`crate::core::dtype::DangerousCastFrom`] — partial/panicking, available as
 //!   `.cast_dangerous::<U>()` only with the `allow_dangerous_casts` feature.
 
-use crate::core::dtype::{CastFrom, Dtype};
+use crate::core::dtype::{CastFrom, Dtype, Numeric};
 #[cfg(feature = "allow_dangerous_casts")]
 use crate::core::dtype::DangerousCastFrom;
 #[cfg(feature = "allow_lossy_casts")]
@@ -78,6 +78,37 @@ impl<T: Dtype> GraphTensor<T> {
         let node = TensorNode {
             storage,
             requires_grad: self.node.requires_grad,
+            grad_fn: None,
+        };
+        GraphTensor {
+            node: Rc::new(node),
+        }
+    }
+}
+
+impl GraphTensor<bool> {
+    /// Reinterpret this boolean tensor elementwise as numeric 1/0 in dtype `T`
+    /// (`T::ONE`/`T::ZERO`).
+    ///
+    /// Unlike `cast::<T>()`, this does **not** route through the cast-trait
+    /// table: `bool` has no numeric value of its own (it is `Dtype`-only), so
+    /// the reinterpretation is available for *every* `T: Numeric` with no edge.
+    /// It is used by the mask-based backward rules (`maximum`/`max`), which are
+    /// dispatched only when a float backward run actually materializes them.
+    /// Internal: public only for cross-module visibility (tensor ops and
+    /// autograd rules).
+    #[doc(hidden)]
+    pub fn as_numeric<T: Numeric>(&self) -> GraphTensor<T> {
+        let storage = cast_storage(&self.node.storage, |b: bool| {
+            if b {
+                T::ONE
+            } else {
+                T::ZERO
+            }
+        });
+        let node = TensorNode {
+            storage,
+            requires_grad: false,
             grad_fn: None,
         };
         GraphTensor {
