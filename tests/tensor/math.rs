@@ -95,7 +95,7 @@ fn complex_operation_forward_and_backward() {
 
     let grads_map = r.backward(true);
 
-    let expected_r = -((8.0 / 3.0) as f64).powi(2).ln();
+    let expected_r = -(8.0_f64 / 3.0).powi(2).ln();
     assert_shape(&r, &shape);
     assert_values(&r, &[expected_r; 6]);
 

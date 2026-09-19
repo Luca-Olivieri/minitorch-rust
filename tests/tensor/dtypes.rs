@@ -90,12 +90,12 @@ fn int_comparison_masks_are_bool() {
     let a = GraphTensor::<i32>::wrap(vec![1, 5, 3, 8], false);
     let b = GraphTensor::<i32>::wrap(4, false);
 
-    assert_eq!(*a.gt(&b).at(&[0]), false);
-    assert_eq!(*a.gt(&b).at(&[1]), true);
-    assert_eq!(*a.gte(&b).at(&[2]), false);
-    assert_eq!(*a.lt(&b).at(&[3]), false);
-    assert_eq!(*a.lte(&b).at(&[3]), false);
-    assert_eq!(*a.lte(&b).at(&[0]), true);
+    assert!(!(*a.gt(&b).at(&[0])));
+    assert!(*a.gt(&b).at(&[1]));
+    assert!(!(*a.gte(&b).at(&[2])));
+    assert!(!(*a.lt(&b).at(&[3])));
+    assert!(!(*a.lte(&b).at(&[3])));
+    assert!(*a.lte(&b).at(&[0]));
 }
 
 #[test]
@@ -197,16 +197,16 @@ fn bool_logic_ops() {
     let t2 = GraphTensor::<bool>::wrap(vec![false, false, true], false);
 
     let land = t1.land(&t2);
-    assert_eq!(*land.at(&[0]), false);
-    assert_eq!(*land.at(&[2]), true);
+    assert!(!(*land.at(&[0])));
+    assert!(*land.at(&[2]));
 
     let lor = t1.lor(&t2);
-    assert_eq!(*lor.at(&[0]), true);
-    assert_eq!(*lor.at(&[1]), false);
+    assert!(*lor.at(&[0]));
+    assert!(!(*lor.at(&[1])));
 
     let lnot = t1.lnot();
-    assert_eq!(*lnot.at(&[0]), false);
-    assert_eq!(*lnot.at(&[1]), true);
+    assert!(!(*lnot.at(&[0])));
+    assert!(*lnot.at(&[1]));
 }
 
 #[test]
@@ -257,8 +257,8 @@ fn bool_masks_reinterpret_and_widen() {
 
     let mask = a.gt(&b);
     assert_shape(&mask, &[4]);
-    assert_eq!(*mask.at(&[0]), false);
-    assert_eq!(*mask.at(&[1]), true);
+    assert!(!(*mask.at(&[0])));
+    assert!(*mask.at(&[1]));
 
     let as_mask = mask.as_numeric::<i32>();
     assert_eq!(*as_mask.at(&[0]), 0);

@@ -109,10 +109,10 @@ fn shape_ops_are_generic_over_bool_and_ints() {
     let a = TensorStorage::from_buffer(vec![2, 3], vec![true, true, false, false, true, false]);
     let t = TensorStorage::transpose(&a, 0, 1);
     assert_eq!(t.shape, vec![3, 2]);
-    assert_eq!(t.buffer[t.offset], true);
+    assert!(t.buffer[t.offset]);
 
     let b = TensorStorage::from_buffer(vec![1, 3], vec![4u8, 5, 6]);
-    let bb = b.broadcast_to_shape(&vec![2, 3]);
+    let bb = b.broadcast_to_shape(&[2, 3]);
     assert_eq!(bb.strides, vec![0, 1]);
     assert_eq!(TensorStorage::sum(&bb, &[]).buffer.as_ref(), &[30u8]);
 }

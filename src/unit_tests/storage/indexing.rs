@@ -84,7 +84,7 @@ fn mul_matches_old_path_on_broadcast_views() {
         (1..=4096 * 256).map(|x| x as f64).collect(),
     );
     let bias = TensorStorage::from_buffer(vec![1, 256], (1..=256).map(|x| x as f64).collect());
-    let bb = bias.broadcast_to_shape(&vec![4096, 256]);
+    let bb = bias.broadcast_to_shape(&[4096, 256]);
     assert!(!bb.contiguous);
     assert_eq!(bb.strides, vec![0, 1]);
 
@@ -102,7 +102,7 @@ fn mul_matches_old_path_on_3d_broadcast() {
         (1..=64 * 64 * 256).map(|x| x as f64).collect(),
     );
     let bias = TensorStorage::from_buffer(vec![1, 1, 256], (1..=256).map(|x| x as f64).collect());
-    let bb = bias.broadcast_to_shape(&vec![64, 64, 256]);
+    let bb = bias.broadcast_to_shape(&[64, 64, 256]);
     assert_eq!(bb.strides, vec![0, 0, 1]);
 
     let old = old_mul(&x, &bb);
@@ -133,13 +133,13 @@ fn bench_strided_mul() {
 
     // bias-broadcast: [256] -> [4096,256], strides [0,1] (inner run 256)
     let bias = TensorStorage::from_buffer(vec![256], (0..256).map(|i| i as f64).collect());
-    let bias_b = bias.broadcast_to_shape(&vec![4096, 256]);
+    let bias_b = bias.broadcast_to_shape(&[4096, 256]);
     assert_eq!(bias_b.strides, vec![0, 1]);
     bench_one("contig x bias-bcast (8MB)", &d, &bias_b);
 
     // 3D bias-broadcast: [1,1,256] -> [64,64,256], strides [0,0,1] (inner run 256)
     let x3 = TensorStorage::from_buffer(vec![64, 64, 256], (0..M).map(|i| i as f64).collect());
     let bias3 = TensorStorage::from_buffer(vec![1, 1, 256], (0..256).map(|i| i as f64).collect());
-    let bias3_b = bias3.broadcast_to_shape(&vec![64, 64, 256]);
+    let bias3_b = bias3.broadcast_to_shape(&[64, 64, 256]);
     bench_one("contig x 3D-bcast (8MB)", &x3, &bias3_b);
 }

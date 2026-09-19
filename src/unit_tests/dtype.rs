@@ -10,7 +10,7 @@ use crate::core::dtype::CastFrom;
 #[test]
 fn identity_is_available() {
     assert_eq!(f64::cast_from(3.5_f64), 3.5);
-    assert_eq!(bool::cast_from(true), true);
+    assert!(bool::cast_from(true));
     assert_eq!(i32::cast_from(7_i32), 7);
 }
 

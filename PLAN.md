@@ -292,10 +292,10 @@ verifiable):
 - [ ] **Session: `cargo fmt` sweep** — `cargo fmt --check` reports pre-existing
   formatting debt across the Stage 0–4 files (and the merge test files); the
   `make check` gate includes `cargo fmt --check`.
-- [ ] **Session: `clippy --all-targets` debt** — `cargo clippy --all-targets
-  -- -D warnings` fails on pre-existing lints in the legacy test files
-  (loop-variable indexing, literal-bool asserts, `vec!`, unnecessary parens).
-  `make check` uses lib-only clippy and is green.
+- [x] **Session: `clippy --all-targets` debt** — `cargo clippy --all-targets
+  -- -D warnings` is now clean: the loop-variable indexing, literal-bool
+  asserts, `vec!`-of-arrays, same-type casts and unnecessary parens in the
+  unit/tensor/nn/models suites were all tidied. `make check` stays green.
 - [ ] **Session: commit the work** — all stages + the deferred-dispatch refactor
   are uncommitted on `main` (`git status` shows the whole tree).
 

@@ -18,16 +18,16 @@ fn one_hot_encodes_last_dim_per_class() {
 
     assert_eq!(oh.shape(), &[4, 2, 4]);
 
-    let expected = vec![
-        vec![vec![0.0, 0.0, 0.0, 1.0], vec![0.0, 0.0, 0.0, 1.0]],
-        vec![vec![0.0, 0.0, 1.0, 0.0], vec![0.0, 0.0, 1.0, 0.0]],
-        vec![vec![0.0, 1.0, 0.0, 0.0], vec![0.0, 1.0, 0.0, 0.0]],
-        vec![vec![1.0, 0.0, 0.0, 0.0], vec![1.0, 0.0, 0.0, 0.0]],
+    let expected = [
+        [[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]],
+        [[0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 1.0, 0.0]],
+        [[0.0, 1.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]],
+        [[1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]],
     ];
-    for i in 0..4 {
-        for j in 0..2 {
-            for k in 0..4 {
-                assert_eq!(*oh.at(&[i, j, k]), expected[i][j][k]);
+    for (i, rows) in expected.iter().enumerate() {
+        for (j, row) in rows.iter().enumerate() {
+            for (k, exp) in row.iter().enumerate() {
+                assert_eq!(*oh.at(&[i, j, k]), *exp);
             }
         }
     }
@@ -216,14 +216,14 @@ fn sum_backward_through_keepdim_broadcasts_to_input() {
     // `out = s * m` with s = keepdim sum over {0,2}, m the multipliers:
     // backprop through `*` sums m over the axes `s` lacks, so each
     // (i, j, k) receives the per-j aggregate Σ_{i,k} m[i,j,k] = 21 / 30.
-    let expected = vec![
-        vec![vec![21.0, 21.0, 21.0], vec![30.0, 30.0, 30.0]],
-        vec![vec![21.0, 21.0, 21.0], vec![30.0, 30.0, 30.0]],
+    let expected = [
+        [[21.0, 21.0, 21.0], [30.0, 30.0, 30.0]],
+        [[21.0, 21.0, 21.0], [30.0, 30.0, 30.0]],
     ];
-    for i in 0..2 {
-        for j in 0..2 {
-            for k in 0..3 {
-                assert_eq!(*da.at(&[i, j, k]), expected[i][j][k]);
+    for (i, rows) in expected.iter().enumerate() {
+        for (j, row) in rows.iter().enumerate() {
+            for (k, exp) in row.iter().enumerate() {
+                assert_eq!(*da.at(&[i, j, k]), *exp);
             }
         }
     }
@@ -256,14 +256,14 @@ fn max_backward_flows_only_to_maxima() {
     assert_eq!(da.shape(), &[2, 2, 3]);
 
     // max over {0, 2} per j: 8 for j=0 (at i=1,k=2), 11 for j=1 (at i=1,k=2)
-    let expected = vec![
-        vec![vec![0.0, 0.0, 0.0], vec![0.0, 0.0, 0.0]],
-        vec![vec![0.0, 0.0, 1.0], vec![0.0, 0.0, 1.0]],
+    let expected = [
+        [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+        [[0.0, 0.0, 1.0], [0.0, 0.0, 1.0]],
     ];
-    for i in 0..2 {
-        for j in 0..2 {
-            for k in 0..3 {
-                assert_eq!(*da.at(&[i, j, k]), expected[i][j][k]);
+    for (i, rows) in expected.iter().enumerate() {
+        for (j, row) in rows.iter().enumerate() {
+            for (k, exp) in row.iter().enumerate() {
+                assert_eq!(*da.at(&[i, j, k]), *exp);
             }
         }
     }
@@ -287,14 +287,14 @@ fn max_backward_through_keepdim_flows_only_to_maxima() {
     assert_eq!(da.shape(), &[2, 2, 3]);
     // analogous to the sum case: the max-slice gradient ds[j] = Σ_{i,k} m[i,j,k]
     // (21 / 30) is expanded over {0,2} and gated by the per-slice max mask
-    let expected = vec![
-        vec![vec![0.0, 0.0, 0.0], vec![0.0, 0.0, 0.0]],
-        vec![vec![0.0, 0.0, 21.0], vec![0.0, 0.0, 30.0]],
+    let expected = [
+        [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+        [[0.0, 0.0, 21.0], [0.0, 0.0, 30.0]],
     ];
-    for i in 0..2 {
-        for j in 0..2 {
-            for k in 0..3 {
-                assert_eq!(*da.at(&[i, j, k]), expected[i][j][k]);
+    for (i, rows) in expected.iter().enumerate() {
+        for (j, row) in rows.iter().enumerate() {
+            for (k, exp) in row.iter().enumerate() {
+                assert_eq!(*da.at(&[i, j, k]), *exp);
             }
         }
     }

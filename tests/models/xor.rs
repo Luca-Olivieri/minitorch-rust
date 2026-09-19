@@ -81,19 +81,18 @@ fn xor_training_reduces_loss_and_tracks_recorded_trajectory() {
     // Forward the untrained model: records the seeded initialisation state.
     let init_logits = model.forward(&inputs);
     assert_eq!(init_logits.shape(), &[4, 2]);
-    let expected_init = vec![
-        vec![0.0, 0.0],
-        vec![0.06010813653256624, 0.17175688032447833],
-        vec![0.1660415734331862, 0.14839191059980794],
-        vec![0.1101211666294248, 0.25343994988589197],
+    let expected_init = [
+        [0.0, 0.0],
+        [0.06010813653256624, 0.17175688032447833],
+        [0.1660415734331862, 0.14839191059980794],
+        [0.1101211666294248, 0.25343994988589197],
     ];
-    for i in 0..4 {
-        for j in 0..2 {
+    for (i, row) in expected_init.iter().enumerate() {
+        for (j, exp) in row.iter().enumerate() {
             let v = *init_logits.at(&[i, j]);
             assert!(
-                (v - expected_init[i][j]).abs() < 1e-9,
-                "init logits[{i}][{j}] = {v}, expected {}",
-                expected_init[i][j]
+                (v - exp).abs() < 1e-9,
+                "init logits[{i}][{j}] = {v}, expected {exp}"
             );
         }
     }

@@ -97,7 +97,7 @@ fn param_mut_targets_only_the_requested_param() {
 
     assert!(!model.scale.requires_grad());
     assert!(model.pos_embed.requires_grad());
-    assert!(model.param_path_mut("scale").unwrap().requires_grad() == false);
+    assert!(!model.param_path_mut("scale").unwrap().requires_grad());
     assert!(model.param_path_mut("lin.weight").unwrap().requires_grad());
     assert!(model.param_path_mut("lin.bias").unwrap().requires_grad());
 }
