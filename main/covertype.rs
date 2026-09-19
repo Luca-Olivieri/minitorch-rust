@@ -1,6 +1,8 @@
 use std::time::Instant;
 
 use minitorch_rust::core::GraphTensor;
+use minitorch_rust::core::nn::activate::ReLU;
+use minitorch_rust::core::nn::compute::Linear;
 use minitorch_rust::core::nn::loss::{CrossEntropyLoss, Loss};
 use minitorch_rust::core::nn::module::Forward1;
 use minitorch_rust::core::nn::optimizer::{Optimizer, SGD};
@@ -8,8 +10,6 @@ use minitorch_rust::core::nn::smoothing::SimpleExpSmoothing;
 use minitorch_rust::core::tensor::AbstractTensor;
 use minitorch_rust::data::dataloader::DataLoader;
 use minitorch_rust::data::dataset::CovertypeDataset;
-use minitorch_rust::core::nn::activate::{ReLU};
-use minitorch_rust::core::nn::compute::Linear;
 use minitorch_rust::module;
 
 use rand::SeedableRng;

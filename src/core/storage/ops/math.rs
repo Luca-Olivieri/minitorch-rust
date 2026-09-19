@@ -69,18 +69,18 @@ impl<T: Numeric> TensorStorage<T> {
 }
 
 impl<T: Signed> TensorStorage<T> {
-    // `neg` needs a signed notion (undefined for unsigned integers), so it
-    // lives on `Signed` (floats and signed integers).
+    // `neg` and `abs` need a signed notion: `neg` is undefined for unsigned
+    // integers (`std` has no `Neg` for `u8`…`u64`) and `abs` for them is the
+    // identity, so both live on `Signed` (floats and signed integers).
     impl_storage_elemwise_ops!(TensorStorage<T>;
         neg,     (a), -a;
+        abs,     (a), a.abs();
     );
 }
 
 impl<T: Float> TensorStorage<T> {
-    // `abs` is reachable only from float ops today (kept float-only); and
     // pow/ln/exp/sqrt are transcendental, so float-only.
     impl_storage_elemwise_ops!(TensorStorage<T>;
-        abs,     (a), a.abs();
         pow,     (b, e), b.powf(e);
         ln,     (a), a.ln();
         exp,     (a), a.exp();

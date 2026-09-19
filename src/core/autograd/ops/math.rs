@@ -39,6 +39,30 @@ impl<T: Signed> GradRule<1, T> for NegOp {
 }
 
 #[derive(Debug)]
+pub struct AbsOp;
+
+impl<T: Signed> GradRule<1, T> for AbsOp {
+    fn compute_grad(
+        &self,
+        operands: &[GraphTensor<T>; 1],
+        in_grad: &GraphTensor<T>,
+        _retain_graph: bool,
+        out: &mut Vec<Option<GraphTensor<T>>>,
+    ) {
+        // y = |a|:  dy/da = sign(a) = (a > 0) - (a < 0); the subgradient is 0 at
+        // a == 0 (both masks are false). Comparisons yield `bool` masks, which
+        // are re-interpreted as 1/0 in `T` via `as_numeric`.
+        let a = &operands[0];
+        let zero = GraphTensor::<T>::new(Vec::new(), T::ZERO, false);
+
+        let pos = a.gt(&zero).as_numeric::<T>();
+        let neg = a.lt(&zero).as_numeric::<T>();
+
+        out.push(a.requires_grad().then(|| in_grad * &(&pos - &neg)));
+    }
+}
+
+#[derive(Debug)]
 pub struct LnOp;
 
 impl<T: Float> GradRule<1, T> for LnOp {
@@ -141,7 +165,11 @@ fn into_col<T: Numeric>(t: &GraphTensor<T>) -> (GraphTensor<T>, bool) {
 }
 
 // Reshape the upstream gradient to the 2D [m, n] shape the kernel expects.
-fn grad_to_2d<T: Numeric>(a_ndim: usize, b_ndim: usize, in_grad: &GraphTensor<T>) -> GraphTensor<T> {
+fn grad_to_2d<T: Numeric>(
+    a_ndim: usize,
+    b_ndim: usize,
+    in_grad: &GraphTensor<T>,
+) -> GraphTensor<T> {
     match (a_ndim, b_ndim) {
         (1, 1) => in_grad.unsqueeze(0).unsqueeze(1),
         (1, _) => in_grad.unsqueeze(0),
@@ -151,7 +179,11 @@ fn grad_to_2d<T: Numeric>(a_ndim: usize, b_ndim: usize, in_grad: &GraphTensor<T>
 }
 
 // dL/dA = in_grad @ B^T
-fn grad_a<T: Numeric>(a: &GraphTensor<T>, b: &GraphTensor<T>, in_grad: &GraphTensor<T>) -> GraphTensor<T> {
+fn grad_a<T: Numeric>(
+    a: &GraphTensor<T>,
+    b: &GraphTensor<T>,
+    in_grad: &GraphTensor<T>,
+) -> GraphTensor<T> {
     let (_, a_was_1d) = into_row(a);
     let (b2, _) = into_col(b);
 
@@ -164,7 +196,11 @@ fn grad_a<T: Numeric>(a: &GraphTensor<T>, b: &GraphTensor<T>, in_grad: &GraphTen
 }
 
 // dL/dB = A^T @ in_grad
-fn grad_b<T: Numeric>(a: &GraphTensor<T>, b: &GraphTensor<T>, in_grad: &GraphTensor<T>) -> GraphTensor<T> {
+fn grad_b<T: Numeric>(
+    a: &GraphTensor<T>,
+    b: &GraphTensor<T>,
+    in_grad: &GraphTensor<T>,
+) -> GraphTensor<T> {
     let (a2, _) = into_row(a);
     let (_, b_was_1d) = into_col(b);
 
@@ -322,24 +358,20 @@ impl<T: Numeric> GradRule<2, T> for MaximumOp {
         let a = &operands[0];
         let b = &operands[1];
 
-        out.push(
-            a.requires_grad().then(|| {
-                reduce_grad_to_shape(
-                    &(in_grad * &a.gte(b).as_numeric::<T>()),
-                    a.shape(),
-                    retain_graph,
-                )
-            }),
-        );
-        out.push(
-            b.requires_grad().then(|| {
-                reduce_grad_to_shape(
-                    &(in_grad * &a.lt(b).as_numeric::<T>()),
-                    b.shape(),
-                    retain_graph,
-                )
-            }),
-        );
+        out.push(a.requires_grad().then(|| {
+            reduce_grad_to_shape(
+                &(in_grad * &a.gte(b).as_numeric::<T>()),
+                a.shape(),
+                retain_graph,
+            )
+        }));
+        out.push(b.requires_grad().then(|| {
+            reduce_grad_to_shape(
+                &(in_grad * &a.lt(b).as_numeric::<T>()),
+                b.shape(),
+                retain_graph,
+            )
+        }));
     }
 }
 

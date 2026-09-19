@@ -114,7 +114,10 @@ impl<T: Numeric> TensorStorage<T> {
             // Flat slice fold seeded with the first element: no stride
             // bookkeeping, vectorizes the cmp/select.
             let slice = &a.buffer[a.offset..a.offset + a.numel];
-            let total = slice.iter().skip(1).fold(slice[0], |acc, v| if *v > acc { *v } else { acc });
+            let total = slice
+                .iter()
+                .skip(1)
+                .fold(slice[0], |acc, v| if *v > acc { *v } else { acc });
             TensorStorage::from_buffer(Vec::new(), vec![total])
         } else {
             // Strided view: same odometer walk as `sum_all`.

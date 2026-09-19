@@ -97,7 +97,14 @@ pub trait Numeric:
 /// forward math is well-defined for any signed type, and their backward rules
 /// negate a gradient (`-grad`), which requires `Neg`.
 #[allow(private_bounds)]
-pub trait Signed: Numeric + std::ops::Neg<Output = Self> {}
+pub trait Signed: Numeric + std::ops::Neg<Output = Self> {
+    /// Absolute value.
+    ///
+    /// Signed integers wrap on the minimum value (there is no `i8::MIN.abs()` in
+    /// `i8`), mirroring PyTorch's `abs` for integer tensors.
+    #[doc(hidden)]
+    fn abs(self) -> Self;
+}
 
 /// IEEE 754 floating-point family.
 ///
@@ -147,6 +154,10 @@ macro_rules! impl_float_family {
                 const ZERO: Self = 0.0;
                 const ONE: Self = 1.0;
             }
+            impl Signed for $t {
+                #[inline(always)]
+                fn abs(self) -> Self { self.abs() }
+            }
             impl Float for $t {
                 fn to_f64(self) -> f64 { self as f64 }
                 fn from_f64(x: f64) -> Self { x as $t }
@@ -176,17 +187,20 @@ macro_rules! impl_integer_family {
     };
 }
 
-macro_rules! impl_signed {
+macro_rules! impl_signed_ints {
     ($($t:ty),+ $(,)?) => {
         $(
-            impl Signed for $t {}
+            impl Signed for $t {
+                #[inline(always)]
+                fn abs(self) -> Self { self.wrapping_abs() }
+            }
         )+
     };
 }
 
 impl_float_family!(f32, f64);
 impl_integer_family!(i8, i16, i32, i64, u8, u16, u32, u64);
-impl_signed!(f32, f64, i8, i16, i32, i64);
+impl_signed_ints!(i8, i16, i32, i64);
 
 /// Internal per-element rendering used by tensor `Display` impls.
 ///

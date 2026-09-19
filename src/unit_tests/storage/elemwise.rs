@@ -70,7 +70,10 @@ fn is_close_matches_torch_semantics_on_f64() {
 fn one_hot_accepts_int_labels() {
     let labels = TensorStorage::from_buffer(vec![3], vec![1i32, 0, 2]);
     let out = TensorStorage::one_hot(&labels, 3);
-    assert_eq!(out.buffer.as_ref(), &[0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]);
+    assert_eq!(
+        out.buffer.as_ref(),
+        &[0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+    );
     assert_eq!(out.shape, vec![3, 3]);
 }
 

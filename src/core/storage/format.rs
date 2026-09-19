@@ -6,7 +6,12 @@ use crate::core::storage::TensorStorage;
 impl<T: DtypeStyler> fmt::Display for TensorStorage<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let data_indent = "       data=".len();
-        writeln!(f, "Tensor(shape={:?}, dtype={},", self.shape, T::dtype_name())?;
+        writeln!(
+            f,
+            "Tensor(shape={:?}, dtype={},",
+            self.shape,
+            T::dtype_name()
+        )?;
         writeln!(
             f,
             "       numel={}, strides={:?}, contiguous={}, offset={},",

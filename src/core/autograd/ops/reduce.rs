@@ -1,9 +1,4 @@
-use crate::core::{
-    GraphTensor,
-    autograd::grad_fn::*,
-    dtype::Numeric,
-    tensor::AbstractTensor,
-};
+use crate::core::{GraphTensor, autograd::grad_fn::*, dtype::Numeric, tensor::AbstractTensor};
 
 // There is a single Sum op that reduces an arbitrary subset of dimensions; summing
 // over all dimensions or a single dimension are just special cases of it. `dims` are

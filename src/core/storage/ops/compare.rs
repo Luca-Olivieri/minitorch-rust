@@ -19,7 +19,12 @@ impl<T: Float> TensorStorage<T> {
     /// following PyTorch's `torch.isclose` semantics (with `equal_nan =
     /// false`). Operands share the float dtype `T`; the result is `bool`.
     /// Tolerances stay `f64`.
-    pub fn is_close(a: &TensorStorage<T>, b: &TensorStorage<T>, rtol: f64, atol: f64) -> TensorStorage<bool> {
+    pub fn is_close(
+        a: &TensorStorage<T>,
+        b: &TensorStorage<T>,
+        rtol: f64,
+        atol: f64,
+    ) -> TensorStorage<bool> {
         apply_op(&[a, b], |&[av, bv]| {
             let avf = av.to_f64();
             let bvf = bv.to_f64();

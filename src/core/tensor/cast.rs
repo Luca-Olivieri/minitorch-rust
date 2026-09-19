@@ -124,13 +124,12 @@ impl GraphTensor<bool> {
     /// autograd rules).
     #[doc(hidden)]
     pub fn as_numeric<T: Numeric>(&self) -> GraphTensor<T> {
-        let storage = cast_storage(&self.node.storage, |b: bool| {
-            if b {
-                T::ONE
-            } else {
-                T::ZERO
-            }
-        });
+        let storage = cast_storage(
+            &self.node.storage,
+            |b: bool| {
+                if b { T::ONE } else { T::ZERO }
+            },
+        );
         let node = TensorNode {
             storage,
             requires_grad: false,

@@ -259,15 +259,18 @@ Two locked rules drive this stage:
 
 ## Divergences — resolved, but with still-open consequences
 
-All five divergences are resolved (see above). What remains open is tracked as
+All six divergences are resolved (see above). What remains open is tracked as
 one-item-per-session tickets (each is self-contained and independently
 verifiable):
 
-- [ ] **Session: Signed-family fallout** — `Signed` family landed
-  (`dtype/mod.rs`): `neg` stays `Signed`; forward `sub`/`div` widened to
-  `Numeric` (unsigned ints get forward-only ops) via deferred dispatch
-  (divergences 2/5). `as_numeric` (`tensor/cast.rs`) survives as a `Numeric`-
-  pure mask reinterpretation for `maximum`/`max` rules — only ever dispatched
+- [x] **Session: Signed-family fallout** — `Signed` landed (`dtype/mod.rs`):
+  `neg` and `abs` stay `Signed`; forward `sub`/`div` widened to `Numeric`
+  (unsigned ints get forward-only ops) via deferred dispatch (divergences 2/5);
+  `Signed::abs` is a required trait method (`wrapping_abs` for signed ints).
+  `abs` is wired onto tensors at the `Signed` home (differentiable for floats,
+  boundary for ints) and `modul` at the `Numeric` home (non-differentiable
+  boundary). `as_numeric` (`tensor/cast.rs`) survives as the `Numeric`-pure mask
+  reinterpretation feeding the `maximum`/`max`/`abs` rules — only ever dispatched
   at backward time, so it is no longer a forward-signature workaround.
 - [x] **Session: edge hygiene (Stage 6a)** — done: `Dtype::DIFFERENTIABLE` +
   `maybe_edge` gate; non-differentiable ops are graph boundaries and do not
@@ -280,9 +283,10 @@ verifiable):
 - [x] **Session: `requires_grad` semantics for non-differentiable ops** —
   resolved in 6a: propagation now requires an edge (`false` for non-diff
   outputs).
-- [ ] **Session: graph-level `abs`/`modul`** — only exist at the storage level;
-  wire them onto tensors (an `abs` bounded by `T: Signed` and a
-  non-differentiable `modul` on `T: Numeric`).
+- [x] **Session: graph-level `abs`/`modul`** — wired in the signed-family session
+  above: `GraphTensor<T>::abs` on `T: Signed` (float-`sign` gradient via
+  `AbsOp`; boundary for ints) and `GraphTensor<T>::modul` on `T: Numeric`
+  (non-differentiable boundary). Tested in `tests/tensor/math.rs`.
 - [ ] **Session: `f16`/`bf16` future members** — `dtype/mod.rs` documents them
   as future `Float` members; would need cast edges into the existing table.
 - [ ] **Session: `cargo fmt` sweep** — `cargo fmt --check` reports pre-existing

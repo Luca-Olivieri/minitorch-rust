@@ -1,11 +1,11 @@
+#[path = "tensor/dtypes.rs"]
+mod dtypes;
 #[path = "tensor/math.rs"]
 mod math;
 #[path = "tensor/reduce.rs"]
 mod reduce;
 #[path = "tensor/shape.rs"]
 mod shape;
-#[path = "tensor/dtypes.rs"]
-mod dtypes;
 
 use minitorch_rust::core::GraphTensor;
 use minitorch_rust::core::tensor::AbstractTensor;

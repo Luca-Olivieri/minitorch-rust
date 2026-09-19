@@ -2,7 +2,7 @@ use std::fmt;
 
 use crate::core::autograd::erased::{ErasedHandle, ErasedTensor, FloatKind, FloatRepr, GradValue};
 use crate::core::autograd::ops::math::{
-    AddOp, DivOp, ExpOp, LnOp, MatmulOp, MaximumOp, MulOp, NegOp, PowOp, SqrtOp, SubOp,
+    AbsOp, AddOp, DivOp, ExpOp, LnOp, MatmulOp, MaximumOp, MulOp, NegOp, PowOp, SqrtOp, SubOp,
 };
 use crate::core::autograd::ops::reduce::{MaxOp, SumOp};
 use crate::core::autograd::ops::shape::{
@@ -93,6 +93,7 @@ pub(crate) enum BackwardOpKind {
     SubOp,
     DivOp,
     NegOp,
+    AbsOp,
     LnOp,
     ExpOp,
     SqrtOp,
@@ -175,6 +176,7 @@ fn box_grad_rule<T: Float>(
         BackwardOpKind::MatmulOp => box_rule::<MatmulOp, 2, T>(operands, MatmulOp {}),
         BackwardOpKind::PowOp => box_rule::<PowOp, 2, T>(operands, PowOp),
         BackwardOpKind::NegOp => box_rule::<NegOp, 1, T>(operands, NegOp),
+        BackwardOpKind::AbsOp => box_rule::<AbsOp, 1, T>(operands, AbsOp),
         BackwardOpKind::LnOp => box_rule::<LnOp, 1, T>(operands, LnOp),
         BackwardOpKind::ExpOp => box_rule::<ExpOp, 1, T>(operands, ExpOp),
         BackwardOpKind::SqrtOp => box_rule::<SqrtOp, 1, T>(operands, SqrtOp),
@@ -357,10 +359,7 @@ impl<Op: fmt::Debug, const N: usize, T: Dtype> fmt::Debug for NBackwardOp<Op, N,
     }
 }
 
-pub trait GradFnTrait<T: Dtype = f64>:
-    HasOperands<T> + ComputesGrads<T> + std::fmt::Debug
-{
-}
+pub trait GradFnTrait<T: Dtype = f64>: HasOperands<T> + ComputesGrads<T> + std::fmt::Debug {}
 impl<T: Dtype, G: HasOperands<T> + ComputesGrads<T> + std::fmt::Debug> GradFnTrait<T> for G {}
 
 pub trait HasOperands<T: Dtype = f64> {

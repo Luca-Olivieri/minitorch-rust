@@ -1,9 +1,4 @@
-use crate::core::{
-    GraphTensor,
-    autograd::grad_fn::*,
-    dtype::Numeric,
-    tensor::AbstractTensor,
-};
+use crate::core::{GraphTensor, autograd::grad_fn::*, dtype::Numeric, tensor::AbstractTensor};
 
 #[derive(Debug)]
 pub struct CopyDOp {}

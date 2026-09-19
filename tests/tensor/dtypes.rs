@@ -44,8 +44,8 @@ fn int_sub_div_neg() {
     assert_eq!(*(&a / &b).at(&[2]), 10);
 
     // Scalar forms take the tensor's own dtype `T` (no cross-dtype coercion).
-    assert_eq!(*((&a - 5)).at(&[1]), 15);
-    assert_eq!(*((&a / 4)).at(&[3]), 10);
+    assert_eq!(*(&a - 5).at(&[1]), 15);
+    assert_eq!(*(&a / 4).at(&[3]), 10);
 }
 
 #[test]
@@ -74,8 +74,8 @@ fn unsigned_sub_div() {
     assert_eq!(*(&a / &b).at(&[2]), 10);
 
     // Scalar forms take the tensor's own dtype `T` (no cross-dtype coercion).
-    assert_eq!(*((&a - 1)).at(&[0]), 9);
-    assert_eq!(*((&a / 8)).at(&[1]), 2);
+    assert_eq!(*(&a - 1).at(&[0]), 9);
+    assert_eq!(*(&a / 8).at(&[1]), 2);
 
     // Unsigned ints are non-differentiable, so these ops are graph boundaries:
     // no edge and no `requires_grad` propagation (a backward run never exists
@@ -225,7 +225,11 @@ fn copy_d_attaches_grad_edge() {
 fn typed_labels_feed_f64_loss_pipeline() {
     let labels = GraphTensor::<i32>::wrap(vec![0, 2, 1], false);
     let logits = GraphTensor::<f64>::wrap(
-        vec![vec![1.0, 2.0, 3.0], vec![1.0, 1.0, 1.0], vec![3.0, 2.0, 1.0]],
+        vec![
+            vec![1.0, 2.0, 3.0],
+            vec![1.0, 1.0, 1.0],
+            vec![3.0, 2.0, 1.0],
+        ],
         true,
     );
 

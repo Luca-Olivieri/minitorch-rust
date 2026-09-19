@@ -3,8 +3,8 @@ use std::ops::{Add, Div, Mul, Neg, Sub};
 use crate::core::autograd::grad_fn::{BackwardOpKind, maybe_edge};
 use crate::core::dtype::{Dtype, Float, Numeric, Signed};
 use crate::core::storage::TensorStorage;
-use crate::core::tensor::extract_requires_grad;
 use crate::core::tensor::GraphTensor;
+use crate::core::tensor::extract_requires_grad;
 
 // Math ops live in dtype homes, chosen by what their *forward* kernels need.
 // Forward edges only record a `BackwardSource`, so no op needs a `GradRule`
@@ -13,15 +13,27 @@ use crate::core::tensor::GraphTensor;
 // an integer is forward-only and records no edge.
 //
 // - Numeric home: add/mul/sub/div (kernels are signed-agnostic, `sub`/`div`
-//   wrap/truncate on integers like PyTorch's uint arithmetic) and maximum
-//   (mask-based gradient).
+//   wrap/truncate on integers like PyTorch's uint arithmetic), maximum
+//   (mask-based gradient) and the modul/sub_scaled boundaries.
 // - Signed home: neg (unsigned negation is undefined — std has no `Neg` for
-//   `u8`…`u64`).
+//   `u8`…`u64`) and abs (`Signed::abs`; differentiable for floats, boundary for
+//   signed ints).
 // - Float home: pow/ln/exp/sqrt and norm/dist (float-only kernels and
 //   derivatives).
 
 impl<T: Numeric> GraphTensor<T> {
     impl_tensor_binary_method!(maximum, TensorStorage::maximum, MaximumOp);
+
+    /// `out[i] = self[i] % other[i]` (truncated remainder). Non-differentiable:
+    /// the truncated division remainder is a sawtooth whose derivative is not
+    /// well-defined, so it is a graph boundary like `maximum`.
+    pub fn modul(&self, other: &GraphTensor<T>) -> GraphTensor<T> {
+        apply_tensor_op(
+            |ops: &[&TensorStorage<T>; 2]| TensorStorage::modul(&[ops[0], ops[1]]),
+            None,
+            &[self, other],
+        )
+    }
 
     /// out[i] = self[i] - scale * other[i], fused into a single storage pass.
     /// Non-differentiable (a linear combination used by the optimizers).
@@ -30,6 +42,19 @@ impl<T: Numeric> GraphTensor<T> {
             |ops: &[&TensorStorage<T>; 2]| TensorStorage::sub_scaled(ops[0], ops[1], scale),
             None,
             &[self, other],
+        )
+    }
+}
+
+impl<T: Signed> GraphTensor<T> {
+    /// Elementwise `|self|`. Differentiable for floats (gradient = sign, 0 at
+    /// zero); a graph boundary for signed integers (`T::DIFFERENTIABLE` is
+    /// false, so no edge is recorded and `requires_grad` does not propagate).
+    pub fn abs(&self) -> GraphTensor<T> {
+        apply_tensor_op(
+            |ops: &[&TensorStorage<T>; 1]| TensorStorage::abs(&[ops[0]]),
+            Some(BackwardOpKind::AbsOp),
+            &[self],
         )
     }
 }

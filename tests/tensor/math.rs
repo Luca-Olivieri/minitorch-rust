@@ -122,10 +122,7 @@ fn complex_operation_forward_and_backward() {
     assert_values(da_grads_map.get(&c).unwrap(), &[0.0625; 6]);
 
     assert_values(db_grads_map.get(&a).unwrap(), &[-0.125; 6]);
-    assert_values(
-        db_grads_map.get(&b).unwrap(),
-        &[-0.09722222222222224; 6],
-    );
+    assert_values(db_grads_map.get(&b).unwrap(), &[-0.09722222222222224; 6]);
     assert_values(db_grads_map.get(&c).unwrap(), &[0.0625; 6]);
 
     assert_values(dc_grads_map.get(&a).unwrap(), &[0.0625; 6]);
@@ -166,4 +163,60 @@ fn matmul_forward_and_backward() {
     let d2a_db = da_grads_map.get(&b).unwrap();
     assert_shape(d2a_db, &[3, 4]);
     assert_values(d2a_db, &[2.0; 12]);
+}
+
+#[test]
+fn abs_forward_and_backward() {
+    let a = GraphTensor::<f64>::wrap(vec![-2.0, 3.0, 0.0], true);
+
+    let y = a.abs();
+    assert_values(&y, &[2.0, 3.0, 0.0]);
+
+    let grads = y.sum(&[], false).backward(false);
+    let da = grads.get(&a).unwrap();
+    // sign(a): -1, +1, and 0 (subgradient) at zero.
+    assert_values(da, &[-1.0, 1.0, 0.0]);
+}
+
+#[test]
+fn abs_is_twice_differentiable_away_from_zero() {
+    let a = GraphTensor::<f64>::wrap(vec![2.0, -4.0], true);
+    let y = a.abs();
+
+    let grads = y.sum(&[], false).backward(true);
+    let da = grads.get(&a).unwrap();
+    assert_values(da, &[1.0, -1.0]);
+
+    let second = da.sum(&[], false).backward(false);
+    // d2|a|/da2 = 0 everywhere except the measure-zero point a == 0: the
+    // constant sign gradient is disconnected from `a`.
+    assert!(second.get(&a).is_none());
+}
+
+#[test]
+fn int_abs_is_a_graph_boundary() {
+    let a = GraphTensor::<i32>::wrap(vec![2, -3], true);
+
+    let y = a.abs();
+    assert_eq!(*y.at(&[0]), 2);
+    assert_eq!(*y.at(&[1]), 3);
+    assert!(!y.requires_grad());
+}
+
+#[test]
+fn modul_values_and_boundary() {
+    let a = GraphTensor::<f64>::wrap(vec![7.5, -7.5], true);
+    let b = GraphTensor::<f64>::wrap(vec![3.0, 3.0], true);
+
+    let r = a.modul(&b);
+    assert_eq!(*r.at(&[0]), 1.5);
+    assert_eq!(*r.at(&[1]), -1.5);
+    assert!(!r.requires_grad());
+
+    // Integers get it too (truncated remainder), as a forward-only boundary.
+    let m = GraphTensor::<i32>::wrap(vec![7, -7], false);
+    let n = GraphTensor::<i32>::wrap(vec![3, 3], false);
+    let rint = m.modul(&n);
+    assert_eq!(*rint.at(&[0]), 1);
+    assert_eq!(*rint.at(&[1]), -1);
 }

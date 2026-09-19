@@ -1,5 +1,5 @@
 use minitorch_rust::core::GraphTensor;
-use minitorch_rust::core::nn::activate::{Softmax, ReLU};
+use minitorch_rust::core::nn::activate::{ReLU, Softmax};
 use minitorch_rust::core::nn::compute::Linear;
 use minitorch_rust::core::nn::loss::{CrossEntropyLoss, Loss};
 use minitorch_rust::core::nn::module::Forward1;
