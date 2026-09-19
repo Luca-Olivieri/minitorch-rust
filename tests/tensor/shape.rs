@@ -195,3 +195,117 @@ fn squeeze_unsqueeze_sum_forward_and_backward() {
     assert_eq!(de.shape(), &[]);
     assert_eq!(*de.at(&[]), 1.0);
 }
+
+#[test]
+fn pad_forward_zero_fills_and_backward_slices_back() {
+    let x = GraphTensor::wrap(vec![vec![1.0, 2.0], vec![3.0, 4.0]], true); // [2, 2]
+    let y = x.pad(&[(1, 1), (2, 0)]); // [4, 4]
+
+    assert_eq!(y.shape(), &[4, 4]);
+    // row 0 padded
+    assert_eq!(*y.at(&[0, 0]), 0.0);
+    assert_eq!(*y.at(&[0, 3]), 0.0);
+    // original block sits at offsets (1, 2)
+    assert_eq!(*y.at(&[1, 2]), 1.0);
+    assert_eq!(*y.at(&[1, 3]), 2.0);
+    assert_eq!(*y.at(&[2, 2]), 3.0);
+    assert_eq!(*y.at(&[2, 3]), 4.0);
+
+    let grads = y.sum(&[], false).backward(true);
+    let dx = grads.get(&x).unwrap();
+    for i in 0..2 {
+        for j in 0..2 {
+            assert_eq!(*dx.at(&[i, j]), 1.0);
+        }
+    }
+}
+
+#[test]
+fn slice_forward_keeps_window_and_backward_pads_zeros() {
+    let x = GraphTensor::wrap(
+        vec![
+            vec![1.0, 2.0, 3.0],
+            vec![4.0, 5.0, 6.0],
+            vec![7.0, 8.0, 9.0],
+        ],
+        true,
+    ); // [3, 3]
+
+    let y = x.slice(&[(1, 2), (0, 2)]); // rows [1,3) x cols [0,2): [[4,5],[7,8]]
+    assert_eq!(y.shape(), &[2, 2]);
+    assert_eq!(*y.at(&[0, 0]), 4.0);
+    assert_eq!(*y.at(&[0, 1]), 5.0);
+    assert_eq!(*y.at(&[1, 0]), 7.0);
+    assert_eq!(*y.at(&[1, 1]), 8.0);
+
+    let grads = y.sum(&[], false).backward(true);
+    let dx = grads.get(&x).unwrap();
+    // only the window's cells receive gradient
+    let expected = [[0.0, 0.0, 0.0], [1.0, 1.0, 0.0], [1.0, 1.0, 0.0]];
+    for (i, e1) in expected.iter().enumerate() {
+        for (j, e2) in e1.iter().enumerate() {
+            assert_eq!(dx.at(&[i, j]), e2, "dx[{i}][{j}]");
+        }
+    }
+}
+
+#[test]
+fn reshape_forward_orders_logically_and_backward_is_its_own_inverse() {
+    let x = GraphTensor::wrap(vec![vec![1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0]], true); // [2, 3]
+
+    // reshape works through strided views: transpose first, then reshape
+    let t = x.transpose(0, 1); // [3, 2] logical [[1,4],[2,5],[3,6]]
+    let r = t.reshape(&[6]);
+    assert_eq!(r.shape(), &[6]);
+    assert_eq!(*r.at(&[0]), 1.0);
+    assert_eq!(*r.at(&[1]), 4.0);
+    assert_eq!(*r.at(&[2]), 2.0);
+    assert_eq!(*r.at(&[3]), 5.0);
+    assert_eq!(*r.at(&[4]), 3.0);
+    assert_eq!(*r.at(&[5]), 6.0);
+
+    let grads = r.sum(&[], false).backward(true);
+    let dx = grads.get(&x).unwrap();
+    assert_eq!(dx.shape(), &[2, 3]);
+    for i in 0..2 {
+        for j in 0..3 {
+            assert_eq!(*dx.at(&[i, j]), 1.0);
+        }
+    }
+}
+
+#[test]
+fn pad_slice_reshape_compose_round_trip() {
+    // pad -> slice of the interior -> reshape must restore the original data.
+    let x = GraphTensor::wrap(vec![vec![1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0]], true);
+    let y = x
+        .pad(&[(1, 0), (2, 1)]) // [3, 6]
+        .slice(&[(1, 2), (2, 3)]) // back to [2, 3]
+        .reshape(&[6]);
+
+    assert_eq!(*y.at(&[0]), 1.0);
+    assert_eq!(*y.at(&[1]), 2.0);
+    assert_eq!(*y.at(&[5]), 6.0);
+
+    let grads = y.sum(&[], false).backward(true);
+    let dx = grads.get(&x).unwrap();
+    for i in 0..2 {
+        for j in 0..3 {
+            assert_eq!(*dx.at(&[i, j]), 1.0);
+        }
+    }
+}
+
+#[test]
+#[should_panic]
+fn reshape_wrong_numel_panics() {
+    let x = GraphTensor::wrap(vec![1.0, 2.0, 3.0], false);
+    let _ = x.reshape(&[2, 2]);
+}
+
+#[test]
+#[should_panic]
+fn slice_out_of_bounds_panics() {
+    let x = GraphTensor::wrap(vec![vec![1.0, 2.0], vec![3.0, 4.0]], false);
+    let _ = x.slice(&[(1, 2), (0, 2)]);
+}

@@ -54,6 +54,48 @@ impl<T: Numeric> GraphTensor<T> {
             &[self],
         )
     }
+
+    /// Zero-pad every dimension by `pads[d] = (before, after)` elements.
+    ///
+    /// Padded regions read as zero; the gradient discards them via an inverse
+    /// slice back to the original shape. `pads` must provide exactly one pair
+    /// per dimension.
+    pub fn pad(&self, pads: &[(usize, usize)]) -> GraphTensor<T> {
+        apply_tensor_op(
+            |ops: &[&TensorStorage<T>; 1]| TensorStorage::pad(ops[0], pads),
+            Some(BackwardOpKind::PadOp {
+                pads: pads.to_vec(),
+            }),
+            &[self],
+        )
+    }
+
+    /// Extract the window `[start, start + len)` along every dimension,
+    /// materializing it into a fresh contiguous tensor.
+    ///
+    /// The gradient places `in_grad` back into the full shape at the slice
+    /// offsets, leaving the excluded elements with zero gradient.
+    pub fn slice(&self, ranges: &[(usize, usize)]) -> GraphTensor<T> {
+        apply_tensor_op(
+            |ops: &[&TensorStorage<T>; 1]| TensorStorage::slice(ops[0], ranges),
+            Some(BackwardOpKind::SliceOp {
+                ranges: ranges.to_vec(),
+            }),
+            &[self],
+        )
+    }
+
+    /// Reinterpret the logical elements under a new shape, materializing into a
+    /// fresh contiguous tensor. `new_shape` must preserve the element count.
+    pub fn reshape(&self, new_shape: &[usize]) -> GraphTensor<T> {
+        apply_tensor_op(
+            |ops: &[&TensorStorage<T>; 1]| TensorStorage::reshape(ops[0], new_shape),
+            Some(BackwardOpKind::ReshapeOp {
+                new_shape: new_shape.to_vec(),
+            }),
+            &[self],
+        )
+    }
 }
 
 impl<T: Dtype> GraphTensor<T> {

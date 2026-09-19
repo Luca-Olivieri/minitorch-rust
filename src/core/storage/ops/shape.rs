@@ -1,4 +1,4 @@
-use crate::core::dtype::Dtype;
+use crate::core::dtype::{Dtype, Numeric};
 use crate::core::storage::compute_numel_from_shape;
 use std::rc::Rc;
 
@@ -296,6 +296,137 @@ impl<T: Dtype> TensorStorage<T> {
             .zip(longer.iter().skip(offset))
             .all(|(a, b)| a == b || *a == 1 || *b == 1)
     }
+}
+
+impl<T: Numeric> TensorStorage<T> {
+    /// Zero-pad every dimension by `pads[d] = (before, after)` elements.
+    ///
+    /// The result is a fresh contiguous storage (a view could not fold pre/post
+    /// offsets into a single stride). `pads` must provide exactly one pair per
+    /// dimension; padded regions read as `T::ZERO`.
+    pub fn pad(a: &TensorStorage<T>, pads: &[(usize, usize)]) -> TensorStorage<T> {
+        let ndim = a.shape.len();
+        if pads.len() != ndim {
+            panic!(
+                "pad requires exactly one (before, after) pair per dimension: got {} pairs for a shape of length {}.",
+                pads.len(),
+                ndim
+            );
+        }
+
+        let out_shape: Vec<usize> = a
+            .shape
+            .iter()
+            .zip(pads)
+            .map(|(&dim, &(before, after))| dim + before + after)
+            .collect();
+        let out_numel = compute_numel_from_shape(&out_shape);
+
+        let out_buf = (0..out_numel)
+            .map(|f| pad_element(a, pads, &out_shape, f))
+            .collect();
+
+        TensorStorage::from_buffer(out_shape, out_buf)
+    }
+
+    /// Extract the window `[start, start + len)` along every dimension,
+    /// materializing it into a fresh contiguous buffer (not a strided view).
+    ///
+    /// `ranges` must provide exactly one `(start, len)` pair per dimension, and
+    /// every window must stay in bounds.
+    pub fn slice(a: &TensorStorage<T>, ranges: &[(usize, usize)]) -> TensorStorage<T> {
+        let ndim = a.shape.len();
+        if ranges.len() != ndim {
+            panic!(
+                "slice requires exactly one (start, len) pair per dimension: got {} pairs for a shape of length {}.",
+                ranges.len(),
+                ndim
+            );
+        }
+        for (d, &(start, len)) in ranges.iter().enumerate() {
+            if start + len > a.shape[d] {
+                panic!(
+                    "slice range (start={start}, len={len}) exceeds dimension {d} of size {}.",
+                    a.shape[d]
+                );
+            }
+        }
+
+        let out_shape: Vec<usize> = ranges.iter().map(|&(_, len)| len).collect();
+        let out_numel = compute_numel_from_shape(&out_shape);
+
+        let out_buf = (0..out_numel)
+            .map(|f| slice_element(a, ranges, f))
+            .collect();
+
+        TensorStorage::from_buffer(out_shape, out_buf)
+    }
+
+    /// Reinterpret the logical elements of `a` under a new shape, producing a
+    /// fresh contiguous buffer.
+    ///
+    /// A reshape *materializes*: it fixes any strided view into canonical
+    /// row-major order, which is what makes it safe to feed transposed or
+    /// broadcast views into kernels that assume contiguity. `new_shape` must
+    /// preserve the element count.
+    pub fn reshape(a: &TensorStorage<T>, new_shape: &[usize]) -> TensorStorage<T> {
+        let new_numel = compute_numel_from_shape(new_shape);
+        if new_numel != a.numel {
+            panic!(
+                "reshape cannot change the number of elements: {} elements can't become shape {:?} ({new_numel}).",
+                a.numel, new_shape
+            );
+        }
+
+        let out_buf: Vec<T> = if a.contiguous {
+            a.buffer[a.offset..a.offset + a.numel].to_vec()
+        } else {
+            a.strided_indices().map(|f| a.buffer[f]).collect()
+        };
+
+        TensorStorage::from_buffer(new_shape.to_vec(), out_buf)
+    }
+}
+
+/// Value at flat output index `f` of the padded tensor: `T::ZERO` in the pad
+/// region, the source element (through its strides) otherwise. Output
+/// coordinates are recovered with div/mod, so this is O(ndim) per element.
+fn pad_element<T: Numeric>(
+    a: &TensorStorage<T>,
+    pads: &[(usize, usize)],
+    out_shape: &[usize],
+    f: usize,
+) -> T {
+    let ndim = a.shape.len();
+    let mut flat = f;
+    let mut in_flat = a.offset;
+    for d in (0..ndim).rev() {
+        let (before, _) = pads[d];
+        let coord = flat % out_shape[d];
+        flat /= out_shape[d];
+
+        let in_coord = coord as isize - before as isize;
+        if in_coord < 0 || in_coord >= a.shape[d] as isize {
+            return T::ZERO;
+        }
+        in_flat += in_coord as usize * a.strides[d];
+    }
+    a.buffer[in_flat]
+}
+
+/// Source element at flat output index `f` of the sliced tensor, resolved
+/// through the source strides (the source may be a strided view).
+fn slice_element<T: Dtype>(a: &TensorStorage<T>, ranges: &[(usize, usize)], f: usize) -> T {
+    let ndim = a.shape.len();
+    let mut flat = f;
+    let mut in_flat = a.offset;
+    for d in (0..ndim).rev() {
+        let (start, len) = ranges[d];
+        let coord = flat % len;
+        flat /= len;
+        in_flat += (start + coord) * a.strides[d];
+    }
+    a.buffer[in_flat]
 }
 
 fn unsqueeze_shape(shape: &[usize], dim: usize) -> Vec<usize> {

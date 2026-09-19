@@ -6,7 +6,7 @@ use crate::core::autograd::ops::math::{
 };
 use crate::core::autograd::ops::reduce::{MaxOp, SumOp};
 use crate::core::autograd::ops::shape::{
-    BroadcastOp, CopyDOp, ExpandOp, SqueezeOp, TransposeOp, UnsqueezeOp,
+    BroadcastOp, CopyDOp, ExpandOp, PadOp, ReshapeOp, SliceOp, SqueezeOp, TransposeOp, UnsqueezeOp,
 };
 use crate::core::{
     GraphTensor,
@@ -125,6 +125,18 @@ pub(crate) enum BackwardOpKind {
     BroadcastOp {
         old_shape: Vec<usize>,
     },
+    /// Zero-pad every dimension by `pads[d] = (before, after)` elements.
+    PadOp {
+        pads: Vec<(usize, usize)>,
+    },
+    /// Extract the window `[start, start + len)` along every dimension.
+    SliceOp {
+        ranges: Vec<(usize, usize)>,
+    },
+    /// Reinterpret the logical elements under a new shape (materializing).
+    ReshapeOp {
+        new_shape: Vec<usize>,
+    },
     /// A differentiable dtype cast. The destination dtype is the node's own
     /// dtype; the source is recovered from the single operand, so neither has to
     /// be stored here.
@@ -199,6 +211,13 @@ fn box_grad_rule<T: Float>(
         BackwardOpKind::ExpandOp { dim } => box_rule::<ExpandOp, 1, T>(operands, ExpandOp { dim }),
         BackwardOpKind::BroadcastOp { old_shape } => {
             box_rule::<BroadcastOp, 1, T>(operands, BroadcastOp { old_shape })
+        }
+        BackwardOpKind::PadOp { pads } => box_rule::<PadOp, 1, T>(operands, PadOp { pads }),
+        BackwardOpKind::SliceOp { ranges } => {
+            box_rule::<SliceOp, 1, T>(operands, SliceOp { ranges })
+        }
+        BackwardOpKind::ReshapeOp { new_shape } => {
+            box_rule::<ReshapeOp, 1, T>(operands, ReshapeOp { new_shape })
         }
         // Cast edges are the one heterogeneous case; they never reach here (see
         // `materialize_grad_fn`).

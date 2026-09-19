@@ -124,3 +124,77 @@ impl<T: Numeric> GradRule<1, T> for BroadcastOp {
         );
     }
 }
+
+#[derive(Debug)]
+pub struct PadOp {
+    pub pads: Vec<(usize, usize)>,
+}
+
+impl<T: Numeric> GradRule<1, T> for PadOp {
+    fn compute_grad(
+        &self,
+        operands: &[GraphTensor<T>; 1],
+        in_grad: &GraphTensor<T>,
+        _retain_graph: bool,
+        out: &mut Vec<Option<GraphTensor<T>>>,
+    ) {
+        // y = pad(x, pads): only the interior (the original x) contributes to y,
+        // so dy/dx is the upstream gradient with the pad region cut away.
+        let shape = operands[0].shape();
+        let ranges: Vec<(usize, usize)> = shape
+            .iter()
+            .enumerate()
+            .map(|(d, &len)| (self.pads[d].0, len))
+            .collect();
+        out.push(operands[0].requires_grad().then(|| in_grad.slice(&ranges)));
+    }
+}
+
+#[derive(Debug)]
+pub struct SliceOp {
+    pub ranges: Vec<(usize, usize)>,
+}
+
+impl<T: Numeric> GradRule<1, T> for SliceOp {
+    fn compute_grad(
+        &self,
+        operands: &[GraphTensor<T>; 1],
+        in_grad: &GraphTensor<T>,
+        _retain_graph: bool,
+        out: &mut Vec<Option<GraphTensor<T>>>,
+    ) {
+        // y = slice(x, ranges): x's elements outside the window are ignored, so
+        // their gradient is 0; the window's gradient is `in_grad` dropped back
+        // into the full shape at the slice offsets (a zero-pad). The pad "after"
+        // the window is `len - (start + slice_len)`, i.e. the elements past the
+        // slice end.
+        let x = &operands[0];
+        let pads: Vec<(usize, usize)> = x
+            .shape()
+            .iter()
+            .enumerate()
+            .map(|(d, &len)| (self.ranges[d].0, len - self.ranges[d].0 - self.ranges[d].1))
+            .collect();
+        out.push(x.requires_grad().then(|| in_grad.pad(&pads)));
+    }
+}
+
+#[derive(Debug)]
+pub struct ReshapeOp {
+    pub new_shape: Vec<usize>,
+}
+
+impl<T: Numeric> GradRule<1, T> for ReshapeOp {
+    fn compute_grad(
+        &self,
+        operands: &[GraphTensor<T>; 1],
+        in_grad: &GraphTensor<T>,
+        _retain_graph: bool,
+        out: &mut Vec<Option<GraphTensor<T>>>,
+    ) {
+        // y = reshape(x, new_shape): the inverse of a reshape is a reshape back
+        // to the operand's own shape (element counts match by construction).
+        let shape = operands[0].shape().clone();
+        out.push(operands[0].requires_grad().then(|| in_grad.reshape(&shape)));
+    }
+}

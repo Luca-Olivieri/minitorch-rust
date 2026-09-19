@@ -1,3 +1,7 @@
+.idea
+.zed
+.vscode
+
 /target
 
 .DS_Store
