@@ -1,4 +1,13 @@
-use crate::core::{GraphTensor, autograd::grad_fn::*, dtype::Numeric, tensor::AbstractTensor};
+use std::rc::Rc;
+
+use crate::core::{
+    GraphTensor,
+    autograd::grad_fn::*,
+    dtype::{Float, Numeric},
+    node::TensorNode,
+    storage::TensorStorage,
+    tensor::{AbstractTensor, TensorNodeAccess},
+};
 
 // There is a single Sum op that reduces an arbitrary subset of dimensions; summing
 // over all dimensions or a single dimension are just special cases of it. `dims` are
@@ -77,5 +86,46 @@ impl<T: Numeric> GradRule<1, T> for MaxOp {
         }
 
         out.push(input.requires_grad().then(|| &grad_b * &mask));
+    }
+}
+
+#[derive(Debug)]
+pub struct AvgPool2dOp {
+    pub kernel: (usize, usize),
+    pub stride: (usize, usize),
+}
+
+impl<T: Float> GradRule<1, T> for AvgPool2dOp {
+    fn compute_grad(
+        &self,
+        operands: &[GraphTensor<T>; 1],
+        in_grad: &GraphTensor<T>,
+        _retain_graph: bool,
+        out: &mut Vec<Option<GraphTensor<T>>>,
+    ) {
+        out.push(operands[0].requires_grad().then(|| {
+            let dy_storage = &TensorNodeAccess::get_node(in_grad).storage;
+            let dx = TensorStorage::avg_pool2d_backward(
+                dy_storage,
+                operands[0].shape(),
+                self.kernel,
+                self.stride,
+            );
+
+            // The produced gradient is a graph boundary: pooling's backward is a
+            // scatter, and its transposed (`unpool`) operator is a different
+            // transform, so there is no edge that could backpropagate through it
+            // correctly. `requires_grad = false` surfaces an attempted
+            // higher-order pass through pooling as a clear panic.
+            let out_node = TensorNode {
+                storage: dx,
+                requires_grad: false,
+                grad_fn: None,
+            };
+
+            GraphTensor {
+                node: Rc::new(out_node),
+            }
+        }));
     }
 }

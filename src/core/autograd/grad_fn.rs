@@ -4,7 +4,7 @@ use crate::core::autograd::erased::{ErasedHandle, ErasedTensor, FloatKind, Float
 use crate::core::autograd::ops::math::{
     AbsOp, AddOp, DivOp, ExpOp, LnOp, MatmulOp, MaximumOp, MulOp, NegOp, PowOp, SqrtOp, SubOp,
 };
-use crate::core::autograd::ops::reduce::{MaxOp, SumOp};
+use crate::core::autograd::ops::reduce::{AvgPool2dOp, MaxOp, SumOp};
 use crate::core::autograd::ops::shape::{
     BroadcastOp, CopyDOp, ExpandOp, PadOp, ReshapeOp, SliceOp, SqueezeOp, TransposeOp, UnsqueezeOp,
 };
@@ -108,6 +108,13 @@ pub(crate) enum BackwardOpKind {
         dims: Vec<usize>,
         keepdim: bool,
     },
+    /// 2D average pooling: `out[b, c, oh, ow]` is the mean of the window at
+    /// `(oh * stride.0, ow * stride.1)`. The gradient scatters the upstream
+    /// gradient, divided by the window size, over every covered input position.
+    AvgPool2dOp {
+        kernel: (usize, usize),
+        stride: (usize, usize),
+    },
     CopyDOp,
     UnsqueezeOp {
         dim: usize,
@@ -197,6 +204,9 @@ fn box_grad_rule<T: Float>(
         }
         BackwardOpKind::MaxOp { dims, keepdim } => {
             box_rule::<MaxOp, 1, T>(operands, MaxOp { dims, keepdim })
+        }
+        BackwardOpKind::AvgPool2dOp { kernel, stride } => {
+            box_rule::<AvgPool2dOp, 1, T>(operands, AvgPool2dOp { kernel, stride })
         }
         BackwardOpKind::CopyDOp => box_rule::<CopyDOp, 1, T>(operands, CopyDOp {}),
         BackwardOpKind::UnsqueezeOp { dim } => {

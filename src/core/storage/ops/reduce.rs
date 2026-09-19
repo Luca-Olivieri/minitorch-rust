@@ -1,4 +1,4 @@
-use crate::core::dtype::{Dtype, Numeric};
+use crate::core::dtype::{Dtype, Float, Numeric};
 use crate::core::storage::TensorStorage;
 
 impl<T: Numeric> TensorStorage<T> {
@@ -130,6 +130,148 @@ impl<T: Numeric> TensorStorage<T> {
                 |acc| acc,
             )
         }
+    }
+}
+
+impl<T: Float> TensorStorage<T> {
+    /// 2D average pooling over a `[batch, channel, height, width]` input.
+    ///
+    /// Every `kernel = (kh, kw)` window starting at spatial position
+    /// `(oh * stride.0, ow * stride.1)` is averaged, producing a fresh
+    /// `[batch, channel, out_h, out_w]` output with
+    /// `out_h = (height - kh) / stride.0 + 1` and
+    /// `out_w = (width - kw) / stride.1 + 1` (PyTorch's floor mode; the window
+    /// must fit entirely in the input — there is no padding).
+    ///
+    /// The input may be a strided view (e.g. a transposed batch): the window is
+    /// walked through `a`'s own strides, so logical layout is preserved.
+    pub fn avg_pool2d(
+        a: &TensorStorage<T>,
+        kernel: (usize, usize),
+        stride: (usize, usize),
+    ) -> TensorStorage<T> {
+        if a.shape.len() != 4 {
+            panic!(
+                "avg_pool2d expects a [batch, channel, height, width] input, got shape {:?}.",
+                a.shape
+            );
+        }
+
+        let (kh, kw) = kernel;
+        let (sh, sw) = stride;
+        if kh == 0 || kw == 0 || sh == 0 || sw == 0 {
+            panic!(
+                "avg_pool2d kernel and stride components must be nonzero, got kernel {kernel:?} stride {stride:?}."
+            );
+        }
+
+        let (h, w) = (a.shape[2], a.shape[3]);
+        if kh > h || kw > w {
+            panic!(
+                "avg_pool2d kernel {kernel:?} extends past the input height x width ({h} x {w})."
+            );
+        }
+
+        let (b, c) = (a.shape[0], a.shape[1]);
+        let out_h = (h - kh) / sh + 1;
+        let out_w = (w - kw) / sw + 1;
+
+        let inv_kernel = T::from_f64(1.0 / (kh * kw) as f64);
+
+        let mut out_buf = Vec::with_capacity(b * c * out_h * out_w);
+        let (s0, s1, s2, s3) = (a.strides[0], a.strides[1], a.strides[2], a.strides[3]);
+
+        for batch in 0..b {
+            let b_base = a.offset + batch * s0;
+            for chan in 0..c {
+                let plane = b_base + chan * s1;
+                for oh in 0..out_h {
+                    let h_base = plane + oh * sh * s2;
+                    for ow in 0..out_w {
+                        let w_base = h_base + ow * sw * s3;
+                        let mut acc = T::ZERO;
+                        for i in 0..kh {
+                            let row = w_base + i * s2;
+                            for j in 0..kw {
+                                acc += a.buffer[row + j * s3];
+                            }
+                        }
+                        out_buf.push(acc * inv_kernel);
+                    }
+                }
+            }
+        }
+
+        TensorStorage::from_buffer(vec![b, c, out_h, out_w], out_buf)
+    }
+
+    /// Gradient of [`Self::avg_pool2d`] with respect to its input.
+    ///
+    /// Each upstream gradient element `dy[b, c, oh, ow]` is scattered into every
+    /// input position its window covered, scaled by `1 / (kh * kw)`. Positions
+    /// covered by several overlapping windows accumulate (onto a fresh
+    /// zero-filled buffer). The result is a fresh `[batch, channel, height,
+    /// width]` buffer matching `input_shape`.
+    pub fn avg_pool2d_backward(
+        dy: &TensorStorage<T>,
+        input_shape: &[usize],
+        kernel: (usize, usize),
+        stride: (usize, usize),
+    ) -> TensorStorage<T> {
+        if input_shape.len() != 4 {
+            panic!(
+                "avg_pool2d backward expects a [batch, channel, height, width] input_shape, got {:?}.",
+                input_shape
+            );
+        }
+
+        let (b, c, h, w) = (
+            input_shape[0],
+            input_shape[1],
+            input_shape[2],
+            input_shape[3],
+        );
+        let (kh, kw) = kernel;
+        let (sh, sw) = stride;
+
+        let out_h = (h - kh) / sh + 1;
+        let out_w = (w - kw) / sw + 1;
+
+        if dy.shape.as_slice() != [b, c, out_h, out_w] {
+            panic!(
+                "avg_pool2d backward: the upstream gradient has shape {:?}, expected [b={b}, c={c}, out_h={out_h}, out_w={out_w}].",
+                dy.shape
+            );
+        }
+
+        let inv_kernel = T::from_f64(1.0 / (kh * kw) as f64);
+
+        let mut out_buf = vec![T::ZERO; input_shape.iter().product()];
+        let (s0, s1, s2, s3) = (dy.strides[0], dy.strides[1], dy.strides[2], dy.strides[3]);
+
+        for batch in 0..b {
+            let b_base = dy.offset + batch * s0;
+            for chan in 0..c {
+                let d_plane = b_base + chan * s1;
+                let out_plane = (batch * c + chan) * h * w;
+                for oh in 0..out_h {
+                    let d_h = d_plane + oh * s2;
+                    for ow in 0..out_w {
+                        let g = dy.buffer[d_h + ow * s3] * inv_kernel;
+                        let oh_row = oh * sh;
+                        let ow_col = ow * sw;
+                        for i in 0..kh {
+                            let row = out_plane + (oh_row + i) * w + ow_col;
+                            for j in 0..kw {
+                                out_buf[row + j] += g;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        TensorStorage::from_buffer(input_shape.to_vec(), out_buf)
     }
 }
 

@@ -153,6 +153,24 @@ impl<T: Float> GraphTensor<T> {
         let count_t = T::from_f64(count as f64);
         &self.sum(&dims, keepdim) / count_t
     }
+
+    /// 2D average pooling over a `[batch, channel, height, width]` input.
+    ///
+    /// Fuses the pooling kernel (window mean over `kernel`, sampled every
+    /// `stride`), rather than composing slices + means, so any kernel/stride
+    /// combination — including overlapping windows — works. Output sizes are
+    /// `(h - kh) / sh + 1` and `(w - kw) / sw + 1` (floor mode, no padding);
+    /// the window must fit entirely in the input. Gradient flows to every input
+    /// position (divided by `kh * kw`, accumulated across overlapping windows),
+    /// but the produced gradient is a graph boundary, so this op cannot be
+    /// differentiated through a second time (like `one_hot`/`argmax`).
+    pub fn avg_pool2d(&self, kernel: (usize, usize), stride: (usize, usize)) -> GraphTensor<T> {
+        apply_tensor_op(
+            |ops: &[&TensorStorage<T>; 1]| TensorStorage::avg_pool2d(ops[0], kernel, stride),
+            Some(BackwardOpKind::AvgPool2dOp { kernel, stride }),
+            &[self],
+        )
+    }
 }
 
 impl<T: Numeric + OneHotLabel> GraphTensor<T> {

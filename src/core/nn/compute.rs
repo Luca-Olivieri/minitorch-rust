@@ -2,7 +2,7 @@ use rand::rngs::StdRng;
 
 use crate::core::GraphTensor;
 use crate::core::dtype::Numeric;
-use crate::core::nn::module::Forward1;
+use crate::core::nn::module::{Forward1, Module};
 use crate::core::tensor::AbstractTensor;
 use crate::module;
 
@@ -184,5 +184,32 @@ impl Forward1 for Conv2d {
                 &conv + &b_4d
             }
         }
+    }
+}
+
+/// A parameterless 2D average-pooling layer over `[batch, channel, height,
+/// width]` inputs. The window is `kernel x kernel` (square); `stride` defaults
+/// to the kernel size (no overlap) when not given. See
+/// [`crate::core::GraphTensor::avg_pool2d`] for output-size semantics.
+pub struct AvgPool2d {
+    pub kernel: (usize, usize),
+    pub stride: (usize, usize),
+}
+
+impl AvgPool2d {
+    pub fn new(kernel_size: usize, stride: Option<usize>) -> Self {
+        let stride = stride.unwrap_or(kernel_size);
+        Self {
+            kernel: (kernel_size, kernel_size),
+            stride: (stride, stride),
+        }
+    }
+}
+
+impl Module for AvgPool2d {}
+
+impl Forward1 for AvgPool2d {
+    fn forward(&self, input: &GraphTensor) -> GraphTensor {
+        input.avg_pool2d(self.kernel, self.stride)
     }
 }
