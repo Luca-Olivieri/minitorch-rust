@@ -1,50 +1,52 @@
+pub(crate) mod erased;
 pub mod grad_fn;
 pub mod ops;
 
 use std::collections::{HashMap, VecDeque};
-use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
-use crate::core::{GraphTensor, dtype::{Dtype, Float}, node::TensorNode};
+use crate::core::autograd::erased::{ErasedTensor, FloatRepr, GradValue};
+use crate::core::autograd::grad_fn::{ErasedGradFn, materialize_grad_fn};
+use crate::core::{GraphTensor, dtype::Float};
 
-use self::grad_fn::GradFnTrait;
-
-pub struct TensorKey<T: Dtype = f64> {
-    node: Rc<TensorNode<T>>, // TODO or use GraphTensor directly
+/// Dtype-erased gradient map, keyed by node identity.
+///
+/// A single backward pass may produce more than one gradient dtype: a
+/// differentiable cast is the one edge that connects two different floats, and
+/// the invariant "a gradient w.r.t. an input has that input's dtype" then forces
+/// both `f32` and `f64` gradients into the same map. So the map is keyed by node
+/// identity rather than by a dtype-typed key; read a gradient back in its
+/// concrete dtype with [`GradMap::get`].
+pub struct GradMap {
+    slots: HashMap<*const (), GradValue>,
 }
 
-impl<T: Dtype> Clone for TensorKey<T> {
-    fn clone(&self) -> Self {
-        TensorKey {
-            node: Rc::clone(&self.node),
-        }
+impl GradMap {
+    /// Number of gradients in the map (leaf gradients by default).
+    pub fn len(&self) -> usize {
+        self.slots.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.slots.is_empty()
+    }
+
+    /// The gradient accumulated for `tensor`, or `None` if it is absent or its
+    /// dtype is not `T` (e.g. `get::<f64>` on an `f32` leaf).
+    #[allow(private_bounds)]
+    pub fn get<T: FloatRepr>(&self, tensor: &GraphTensor<T>) -> Option<&GraphTensor<T>> {
+        let ptr = Rc::as_ptr(&tensor.node) as *const ();
+        self.slots.get(&ptr).and_then(T::try_ref_grad_value)
     }
 }
 
-impl<T: Dtype> PartialEq for TensorKey<T> {
-    fn eq(&self, other: &Self) -> bool {
-        Rc::as_ptr(&self.node) == Rc::as_ptr(&other.node)
-    }
-}
-
-impl<T: Dtype> Eq for TensorKey<T> {}
-
-impl<T: Dtype> Hash for TensorKey<T> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        Rc::as_ptr(&self.node).hash(state);
-    }
-}
-
-impl<T: Dtype> GraphTensor<T> {
-    pub fn to_key(&self) -> TensorKey<T> {
-        TensorKey {
-            node: Rc::clone(&self.node),
-        }
-    }
-}
-
-impl<T: Float> GraphTensor<T> {
-    pub fn backward(&self, retain_graph: bool) -> HashMap<TensorKey<T>, GraphTensor<T>> {
+#[allow(private_bounds)]
+impl<T: FloatRepr> GraphTensor<T> {
+    /// Run the backward pass for the graph reachable from `self`.
+    ///
+    /// The result is a dtype-erased [`GradMap`], because a mixed `f32`/`f64`
+    /// graph (created by a differentiable cast) yields gradients in both dtypes.
+    pub fn backward(&self, retain_graph: bool) -> GradMap {
         self.compile_backward().run(retain_graph)
     }
 
@@ -54,7 +56,7 @@ impl<T: Float> GraphTensor<T> {
     /// stays valid as long as the graph is alive and can be re-executed any number of
     /// times (e.g. with different `retain_graph` flags), reusing the compiled
     /// topological schedule and the gradient/scratch buffers across runs.
-    pub fn compile_backward(&self) -> BackwardPlan<T> {
+    pub fn compile_backward(&self) -> BackwardPlan {
         BackwardPlan::build(self)
     }
 }
@@ -62,81 +64,71 @@ impl<T: Float> GraphTensor<T> {
 /// A fully compiled backward schedule for a fixed forward graph.
 ///
 /// Nodes are assigned dense integer indices once at build time; subsequent runs are
-/// pure integer/Vec operations (no hashing, no per-node key churn, no per-node
-/// scratch allocations) until the final leaf-gradient map is materialized.
+/// pure integer/Vec operations (no hashing, no per-node key churn) until the final
+/// gradient map is materialized.
 ///
-/// Backward passes only run for float dtypes (every gradient is a float workload),
-/// so the plan's gradient buffers are `GraphTensor<T>` for `T: Float`.
-pub struct BackwardPlan<T: Dtype = f64> {
-    nodes: Vec<TensorKey<T>>,
+/// The plan is *dtype-erased*: nodes, rules and gradient slots are all
+/// `ErasedTensor`/`GradValue`, dispatched per node over the closed `f32`/`f64`
+/// set. That is what lets one graph (and so one backward pass) mix float dtypes,
+/// which a differentiable cast requires. The typed math still lives in
+/// `GradRule`/`NBackwardOp`, monomorphized per dtype.
+pub struct BackwardPlan {
+    nodes: Vec<ErasedTensor>,
     seed_idx: usize,
     operands: Vec<Vec<usize>>,
-    // Materialized rules: `grad_fns[u]` is the concrete backward op for node
-    // `u`, frozen from its deferred `BackwardSource` at build time (see
-    // `BackwardSource::into_grad_fn`). `run` executes these without touching
-    // the live forward graph.
-    grad_fns: Vec<Option<Box<dyn GradFnTrait<T>>>>,
+    // Materialized rules: `grad_fns[u]` is the erased backward op for node `u`,
+    // frozen from its deferred `BackwardSource` at build time (see
+    // [`materialize_grad_fn`]). `run` executes these without touching the live
+    // forward graph.
+    grad_fns: Vec<Option<Box<dyn ErasedGradFn>>>,
     is_leaf: Vec<bool>,
     base_in_degree: Vec<usize>,
-    grads: Vec<Option<GraphTensor<T>>>,
-    scratch: Vec<Option<GraphTensor<T>>>,
+    grads: Vec<Option<GradValue>>,
+    scratch: Vec<Option<GradValue>>,
 }
 
-impl<T: Float> BackwardPlan<T> {
+impl BackwardPlan {
     /// Walk the forward graph once, assigning each reachable, requires-grad node a
     /// dense index and recording its operand indices, leaf-ness, and in-degree.
-    fn build(seed: &GraphTensor<T>) -> BackwardPlan<T> {
-        let mut nodes: Vec<TensorKey<T>> = Vec::new();
-        let mut index_of: HashMap<*const TensorNode<T>, usize> = HashMap::new();
+    fn build<T: FloatRepr>(seed: &GraphTensor<T>) -> BackwardPlan {
+        let mut nodes: Vec<ErasedTensor> = Vec::new();
+        let mut index_of: HashMap<*const (), usize> = HashMap::new();
         let mut operands: Vec<Vec<usize>> = Vec::new();
-        let mut grad_fns: Vec<Option<Box<dyn GradFnTrait<T>>>> = Vec::new();
+        let mut grad_fns: Vec<Option<Box<dyn ErasedGradFn>>> = Vec::new();
         let mut is_leaf: Vec<bool> = Vec::new();
         let mut bfs_queue: VecDeque<usize> = VecDeque::new();
 
         let seed_idx = 0usize;
-        nodes.push(seed.to_key());
-        index_of.insert(Rc::as_ptr(&seed.node), seed_idx);
+        let seed = T::into_erased(seed.copy_s());
+        index_of.insert(seed.ptr(), seed_idx);
+        is_leaf.push(seed.is_leaf());
         operands.push(Vec::new());
         grad_fns.push(None);
-        is_leaf.push(seed.node.grad_fn.is_none());
+        nodes.push(seed);
         bfs_queue.push_back(seed_idx);
 
         while let Some(u) = bfs_queue.pop_front() {
             // do not propagate through nodes that do not require gradients.
-            if !nodes[u].node.requires_grad {
+            if !nodes[u].requires_grad() {
                 continue;
             }
 
-            // Snapshot the operand graph tensors so `nodes` can grow while iterating.
-            let op_graphs = {
-                let Some(src) = &nodes[u].node.grad_fn else {
-                    continue;
-                };
-                src.operands()
-                    .iter()
-                    .map(|op| op.copy_s())
-                    .collect::<Vec<_>>()
-            };
+            // Snapshot the erased operands so `nodes` can grow while iterating,
+            // then freeze this node's deferred rule into the plan.
+            let op_erased = nodes[u].erased_operands();
+            grad_fns[u] = materialize_grad_fn(&nodes[u]);
 
-            // Freeze this node's deferred rule into the plan (T: Float here, so
-            // every rule's Numeric/Signed/Float bound is satisfiable).
-            grad_fns[u] = nodes[u]
-                .node
-                .grad_fn
-                .as_ref()
-                .map(|src| (**src).clone().into_grad_fn());
-
-            for op in op_graphs.iter() {
-                let ptr = Rc::as_ptr(&op.node);
+            for op in op_erased {
+                let ptr = op.ptr();
                 let v = match index_of.get(&ptr) {
                     Some(&v) => v,
                     None => {
                         let v = nodes.len();
-                        nodes.push(op.to_key());
-                        index_of.insert(ptr, v);
+                        is_leaf.push(op.is_leaf());
                         operands.push(Vec::new());
                         grad_fns.push(None);
-                        is_leaf.push(op.node.grad_fn.is_none());
+                        nodes.push(op);
+                        index_of.insert(ptr, v);
                         bfs_queue.push_back(v);
                         v
                     }
@@ -167,9 +159,28 @@ impl<T: Float> BackwardPlan<T> {
     }
 
     /// Execute the compiled backward pass from the seed this plan was built for.
-    pub fn run(&mut self, retain_graph: bool) -> HashMap<TensorKey<T>, GraphTensor<T>> {
+    pub fn run(&mut self, retain_graph: bool) -> GradMap {
+        self.execute(retain_graph);
+
+        // Materialize the output map, moving gradients out of the reusable buffer.
+        // First-order path: keep only leaf tensors; higher-order callers keep every
+        // gradient so they can fetch intermediates.
+        let mut slots = HashMap::new();
+        for (i, grad) in self.grads.iter_mut().enumerate() {
+            if (retain_graph || self.is_leaf[i])
+                && let Some(g) = grad.take()
+            {
+                slots.insert(self.nodes[i].ptr(), g);
+            }
+        }
+
+        GradMap { slots }
+    }
+
+    /// Walk the scheduled graph, filling `self.grads` with erased gradient slots.
+    fn execute(&mut self, retain_graph: bool) {
         assert!(
-            self.nodes[self.seed_idx].node.requires_grad,
+            self.nodes[self.seed_idx].requires_grad(),
             "Cannot run backward() on a tensor with requires_grad=False. Likely, the graph has no leaf nodes requiring gradients."
         );
 
@@ -180,8 +191,7 @@ impl<T: Float> BackwardPlan<T> {
 
         // NOTE: if 'retain_graph' = True, the gradient tensors have 'requires_grad = True'
         //       otherwise, you cannot compute higher-order derivatives
-        let seed_shape = self.nodes[self.seed_idx].node.storage.shape.clone();
-        let seed_grad = GraphTensor::new(seed_shape, T::from_f64(1.0), retain_graph);
+        let seed_grad = self.nodes[self.seed_idx].one_grad(retain_graph);
         self.grads[self.seed_idx] = Some(seed_grad.copy_s());
 
         let mut process_queue: VecDeque<usize> = VecDeque::new();
@@ -189,17 +199,17 @@ impl<T: Float> BackwardPlan<T> {
 
         while let Some(u) = process_queue.pop_front() {
             // Skip nodes that do not require gradients.
-            if !self.nodes[u].node.requires_grad {
+            if !self.nodes[u].requires_grad() {
                 continue;
             }
 
-            let Some(grad_fn) = &self.grad_fns[u] else {
+            let Some(grad_fn) = self.grad_fns[u].as_mut() else {
                 continue;
             };
 
             {
                 let in_grad = self.grads[u].as_ref().unwrap();
-                grad_fn.compute_operands_grad(in_grad, retain_graph, &mut self.scratch);
+                grad_fn.compute(in_grad, retain_graph, &mut self.scratch);
             }
 
             for (&v, op_grad_opt) in self.operands[u].iter().zip(self.scratch.iter()) {
@@ -220,20 +230,6 @@ impl<T: Float> BackwardPlan<T> {
                 }
             }
         }
-
-        // Materialize the output map, moving gradients out of the reusable buffer.
-        // First-order path: keep only leaf tensors; higher-order callers keep every
-        // gradient so they can fetch intermediates.
-        let mut grads_map = HashMap::new();
-        for (i, grad) in self.grads.iter_mut().enumerate() {
-            if (retain_graph || self.is_leaf[i])
-                && let Some(g) = grad.take()
-            {
-                grads_map.insert(self.nodes[i].clone(), g);
-            }
-        }
-
-        grads_map
     }
 }
 
@@ -247,26 +243,42 @@ impl<T: Float> BackwardPlan<T> {
 /// in place, skipping the allocation and the graph node entirely. Fall back to
 /// the allocating sum when the buffer cannot be mutated (shared/aliased or
 /// strided).
-fn accumulate_grad<T: Float>(
-    grads: &mut [Option<GraphTensor<T>>],
+fn accumulate_grad(
+    grads: &mut [Option<GradValue>],
     v: usize,
-    op_grad: &GraphTensor<T>,
+    op_grad: &GradValue,
     retain_graph: bool,
 ) {
     if retain_graph {
         let a = grads[v].as_ref().unwrap();
-        let sum = a + op_grad;
-        grads[v] = Some(sum);
+        grads[v] = Some(add_grads(a, op_grad));
     } else {
         let fused = match grads.get_mut(v).and_then(|g| g.as_mut()) {
-            Some(a) => try_accumulate_inplace(a, op_grad),
+            Some(a) => try_add_assign_grad(a, op_grad),
             None => false,
         };
         if !fused {
             let a = grads[v].as_ref().unwrap();
-            let sum = a + op_grad;
-            grads[v] = Some(sum);
+            grads[v] = Some(add_grads(a, op_grad));
         }
+    }
+}
+
+/// Add two gradient slots. They must share a dtype (see `GradValue`).
+fn add_grads(a: &GradValue, b: &GradValue) -> GradValue {
+    match (a, b) {
+        (GradValue::F32(a), GradValue::F32(b)) => GradValue::F32(a + b),
+        (GradValue::F64(a), GradValue::F64(b)) => GradValue::F64(a + b),
+        _ => panic!("Cannot add gradients of different dtypes."),
+    }
+}
+
+/// In-place accumulation for matching gradient slots.
+fn try_add_assign_grad(a: &mut GradValue, b: &GradValue) -> bool {
+    match (a, b) {
+        (GradValue::F32(a), GradValue::F32(b)) => try_accumulate_inplace(a, b),
+        (GradValue::F64(a), GradValue::F64(b)) => try_accumulate_inplace(a, b),
+        _ => panic!("Cannot accumulate gradients of different dtypes."),
     }
 }
 

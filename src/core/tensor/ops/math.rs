@@ -1,6 +1,6 @@
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
-use crate::core::autograd::grad_fn::BackwardSource;
+use crate::core::autograd::grad_fn::{BackwardOpKind, maybe_edge};
 use crate::core::dtype::{Dtype, Float, Numeric, Signed};
 use crate::core::storage::TensorStorage;
 use crate::core::tensor::extract_requires_grad;
@@ -9,6 +9,8 @@ use crate::core::tensor::GraphTensor;
 // Math ops live in dtype homes, chosen by what their *forward* kernels need.
 // Forward edges only record a `BackwardSource`, so no op needs a `GradRule`
 // bound to be constructed; the rule is materialized at backward time (T: Float).
+// Edges are dtype-gated (`maybe_edge` / `T::DIFFERENTIABLE`): a `Numeric` op on
+// an integer is forward-only and records no edge.
 //
 // - Numeric home: add/mul/sub/div (kernels are signed-agnostic, `sub`/`div`
 //   wrap/truncate on integers like PyTorch's uint arithmetic) and maximum
@@ -26,7 +28,7 @@ impl<T: Numeric> GraphTensor<T> {
     pub fn sub_scaled(&self, other: &GraphTensor<T>, scale: T) -> GraphTensor<T> {
         apply_tensor_op(
             |ops: &[&TensorStorage<T>; 2]| TensorStorage::sub_scaled(ops[0], ops[1], scale),
-            None::<fn([GraphTensor<T>; 2]) -> Box<BackwardSource<T>>>,
+            None,
             &[self, other],
         )
     }
@@ -65,28 +67,27 @@ impl<T: Float> GraphTensor<T> {
     }
 }
 
-pub(crate) fn apply_tensor_op<T: Dtype, F, G, const N: usize>(
+pub(crate) fn apply_tensor_op<T: Dtype, F, const N: usize>(
     op: F,
-    grad_fn: Option<G>,
+    grad_op: Option<BackwardOpKind>,
     operands: &[&GraphTensor<T>; N],
 ) -> GraphTensor<T>
 where
     F: Fn(&[&TensorStorage<T>; N]) -> TensorStorage<T>,
-    G: FnOnce([GraphTensor<T>; N]) -> Box<BackwardSource<T>>,
 {
+    // Edge attachment is dtype-gated: `maybe_edge` is compiled away for
+    // non-differentiable dtypes, so those ops are graph boundaries and do not
+    // propagate `requires_grad`.
+    let edge = grad_op.and_then(|op| maybe_edge(operands, op));
+    let requires_grad = edge.is_some() && extract_requires_grad(operands);
+
     with_broadcast_operands(operands, |storages: &[&TensorStorage<T>; N]| {
         let out_store = op(storages);
 
-        // Only generate a grad_fn if one was provided
-        let grad_fn_opt = grad_fn.map(|g| {
-            let new_operands: [GraphTensor<T>; N] = std::array::from_fn(|i| operands[i].copy_s());
-            g(new_operands)
-        });
-
         let out_node = crate::core::node::TensorNode {
             storage: out_store,
-            requires_grad: extract_requires_grad(operands),
-            grad_fn: grad_fn_opt,
+            requires_grad,
+            grad_fn: edge,
         };
 
         GraphTensor {

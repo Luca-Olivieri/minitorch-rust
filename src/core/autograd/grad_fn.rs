@@ -1,5 +1,6 @@
 use std::fmt;
 
+use crate::core::autograd::erased::{ErasedHandle, ErasedTensor, FloatKind, FloatRepr, GradValue};
 use crate::core::autograd::ops::math::{
     AddOp, DivOp, ExpOp, LnOp, MatmulOp, MaximumOp, MulOp, NegOp, PowOp, SqrtOp, SubOp,
 };
@@ -20,24 +21,27 @@ use crate::core::{
 /// forward home of an op (e.g. `sub` on every [`Numeric`]) is decoupled from
 /// what its backward math needs (a [`GradRule`] bound like `T: Signed`).
 ///
-/// The concrete rule is materialized — [`BackwardSource::into_grad_fn`] — only
-/// at backward-build time, when `T: Float` is known and every rule's
-/// `Numeric`/`Signed`/`Float` bound is satisfiable.
-pub(crate) struct BackwardSource<T: Dtype = f64> {
-    operands: Vec<GraphTensor<T>>,
+/// The operands are stored *dtype-erased* ([`ErasedHandle`]) so an edge can
+/// connect nodes of different float dtypes (a differentiable cast). The concrete
+/// rule is materialized —
+/// [`BackwardSource::into_grad_fn`] — only at backward-build time, when the
+/// node's dtype is known and every rule's `Numeric`/`Signed`/`Float` bound is
+/// satisfiable.
+pub(crate) struct BackwardSource {
+    operands: Vec<ErasedHandle>,
     op: BackwardOpKind,
 }
 
-impl<T: Dtype> Clone for BackwardSource<T> {
+impl Clone for BackwardSource {
     fn clone(&self) -> Self {
         Self {
-            operands: self.operands.iter().map(|o| o.copy_s()).collect(),
+            operands: self.operands.clone(),
             op: self.op.clone(),
         }
     }
 }
 
-impl<T: Dtype> fmt::Debug for BackwardSource<T> {
+impl fmt::Debug for BackwardSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // GraphTensor's Debug needs a styler bound; print counts instead so the
         // node-level Debug impl stays usable for every dtype.
@@ -48,13 +52,33 @@ impl<T: Dtype> fmt::Debug for BackwardSource<T> {
     }
 }
 
-impl<T: Dtype> BackwardSource<T> {
-    pub(crate) fn new(operands: Vec<GraphTensor<T>>, op: BackwardOpKind) -> Self {
+impl BackwardSource {
+    pub(crate) fn new(operands: Vec<ErasedHandle>, op: BackwardOpKind) -> Self {
         Self { operands, op }
     }
 
-    pub(crate) fn operands(&self) -> &[GraphTensor<T>] {
+    pub(crate) fn operands(&self) -> &[ErasedHandle] {
         &self.operands
+    }
+}
+
+/// Build the deferred gradient edge for a differentiable op, or `None` when the
+/// operand dtype does not participate in autograd.
+///
+/// This is the single gate for "non-differentiable operations produce no graph
+/// edges": `T::DIFFERENTIABLE` is a compile-time constant, so for integer/bool
+/// instantiations the whole branch is eliminated and no operands are erased.
+pub(crate) fn maybe_edge<T: Dtype, const N: usize>(
+    operands: &[&GraphTensor<T>; N],
+    op: BackwardOpKind,
+) -> Option<Box<BackwardSource>> {
+    if T::DIFFERENTIABLE {
+        Some(Box::new(BackwardSource::new(
+            operands.iter().map(|o| ErasedHandle::erase(o)).collect(),
+            op,
+        )))
+    } else {
+        None
     }
 }
 
@@ -100,69 +124,226 @@ pub(crate) enum BackwardOpKind {
     BroadcastOp {
         old_shape: Vec<usize>,
     },
+    /// A differentiable dtype cast. The destination dtype is the node's own
+    /// dtype; the source is recovered from the single operand, so neither has to
+    /// be stored here.
+    CastOp,
 }
 
-impl<T: Float> BackwardSource<T> {
-    /// Rebuild the concrete `NBackwardOp` (operands + rule struct) the forward
-    /// op would previously have boxed. Backward passes only run for float
-    /// dtypes, so every rule's `Numeric`/`Signed`/`Float` bound holds here.
-    pub(crate) fn into_grad_fn(self) -> Box<dyn GradFnTrait<T>> {
-        fn box_rule<Op, const N: usize, T: Float>(
-            operands: Vec<GraphTensor<T>>,
-            op: Op,
-        ) -> Box<dyn GradFnTrait<T>>
-        where
-            Op: GradRule<N, T> + fmt::Debug + 'static,
-        {
-            let operands: [GraphTensor<T>; N] = match operands.try_into() {
-                Ok(operands) => operands,
-                Err(_) => panic!("BackwardSource operand count must match the op arity"),
-            };
-            Box::new(NBackwardOp { operands, op }) as Box<dyn GradFnTrait<T>>
-        }
+impl BackwardSource {
+    /// Rebuild the concrete, typed `NBackwardOp` (operands + rule struct) for a
+    /// node of dtype `T`. Called at backward-build time, so every rule's
+    /// `Numeric`/`Signed`/`Float` bound holds.
+    ///
+    /// Every operand must have the node's dtype: only a differentiable cast
+    /// connects different dtypes, and it uses its own rule.
+    pub(crate) fn into_grad_fn<T: FloatRepr>(self) -> Box<dyn GradFnTrait<T>> {
+        let operands = self
+            .operands
+            .into_iter()
+            .map(|handle| T::take_erased(handle.into_erased()))
+            .collect();
+        box_grad_rule(operands, self.op)
+    }
+}
 
-        let BackwardSource { operands, op } = self;
-        match op {
-            BackwardOpKind::AddOp => box_rule::<AddOp, 2, T>(operands, AddOp),
-            BackwardOpKind::MulOp => box_rule::<MulOp, 2, T>(operands, MulOp),
-            BackwardOpKind::SubOp => box_rule::<SubOp, 2, T>(operands, SubOp),
-            BackwardOpKind::DivOp => box_rule::<DivOp, 2, T>(operands, DivOp),
-            BackwardOpKind::MaximumOp => box_rule::<MaximumOp, 2, T>(operands, MaximumOp),
-            BackwardOpKind::MatmulOp => box_rule::<MatmulOp, 2, T>(operands, MatmulOp {}),
-            BackwardOpKind::PowOp => box_rule::<PowOp, 2, T>(operands, PowOp),
-            BackwardOpKind::NegOp => box_rule::<NegOp, 1, T>(operands, NegOp),
-            BackwardOpKind::LnOp => box_rule::<LnOp, 1, T>(operands, LnOp),
-            BackwardOpKind::ExpOp => box_rule::<ExpOp, 1, T>(operands, ExpOp),
-            BackwardOpKind::SqrtOp => box_rule::<SqrtOp, 1, T>(operands, SqrtOp),
-            BackwardOpKind::SumOp { dims, keepdim } => {
-                box_rule::<SumOp, 1, T>(operands, SumOp { dims, keepdim })
+/// Box the concrete rule struct for `op` over typed operands.
+fn box_grad_rule<T: Float>(
+    operands: Vec<GraphTensor<T>>,
+    op: BackwardOpKind,
+) -> Box<dyn GradFnTrait<T>> {
+    fn box_rule<Op, const N: usize, T: Float>(
+        operands: Vec<GraphTensor<T>>,
+        op: Op,
+    ) -> Box<dyn GradFnTrait<T>>
+    where
+        Op: GradRule<N, T> + fmt::Debug + 'static,
+    {
+        let operands: [GraphTensor<T>; N] = match operands.try_into() {
+            Ok(operands) => operands,
+            Err(_) => panic!("BackwardSource operand count must match the op arity"),
+        };
+        Box::new(NBackwardOp { operands, op }) as Box<dyn GradFnTrait<T>>
+    }
+
+    match op {
+        BackwardOpKind::AddOp => box_rule::<AddOp, 2, T>(operands, AddOp),
+        BackwardOpKind::MulOp => box_rule::<MulOp, 2, T>(operands, MulOp),
+        BackwardOpKind::SubOp => box_rule::<SubOp, 2, T>(operands, SubOp),
+        BackwardOpKind::DivOp => box_rule::<DivOp, 2, T>(operands, DivOp),
+        BackwardOpKind::MaximumOp => box_rule::<MaximumOp, 2, T>(operands, MaximumOp),
+        BackwardOpKind::MatmulOp => box_rule::<MatmulOp, 2, T>(operands, MatmulOp {}),
+        BackwardOpKind::PowOp => box_rule::<PowOp, 2, T>(operands, PowOp),
+        BackwardOpKind::NegOp => box_rule::<NegOp, 1, T>(operands, NegOp),
+        BackwardOpKind::LnOp => box_rule::<LnOp, 1, T>(operands, LnOp),
+        BackwardOpKind::ExpOp => box_rule::<ExpOp, 1, T>(operands, ExpOp),
+        BackwardOpKind::SqrtOp => box_rule::<SqrtOp, 1, T>(operands, SqrtOp),
+        BackwardOpKind::SumOp { dims, keepdim } => {
+            box_rule::<SumOp, 1, T>(operands, SumOp { dims, keepdim })
+        }
+        BackwardOpKind::MaxOp { dims, keepdim } => {
+            box_rule::<MaxOp, 1, T>(operands, MaxOp { dims, keepdim })
+        }
+        BackwardOpKind::CopyDOp => box_rule::<CopyDOp, 1, T>(operands, CopyDOp {}),
+        BackwardOpKind::UnsqueezeOp { dim } => {
+            box_rule::<UnsqueezeOp, 1, T>(operands, UnsqueezeOp { dim })
+        }
+        BackwardOpKind::SqueezeOp { dim } => {
+            box_rule::<SqueezeOp, 1, T>(operands, SqueezeOp { dim })
+        }
+        BackwardOpKind::TransposeOp { dim_a, dim_b } => {
+            box_rule::<TransposeOp, 1, T>(operands, TransposeOp { dim_a, dim_b })
+        }
+        BackwardOpKind::ExpandOp { dim } => box_rule::<ExpandOp, 1, T>(operands, ExpandOp { dim }),
+        BackwardOpKind::BroadcastOp { old_shape } => {
+            box_rule::<BroadcastOp, 1, T>(operands, BroadcastOp { old_shape })
+        }
+        // Cast edges are the one heterogeneous case; they never reach here (see
+        // `materialize_grad_fn`).
+        BackwardOpKind::CastOp => unreachable!("cast edges use ErasedCastGradFn"),
+    }
+}
+
+/// The erased, object-safe form of a node's backward rule.
+///
+/// The plan stores one per inner node and calls it uniformly with erased
+/// gradient slots; the typed rule and its reusable scratch buffer live behind
+/// the `f32`/`f64` dispatch in [`TypedGradFn`].
+pub(crate) trait ErasedGradFn {
+    fn compute(
+        &mut self,
+        in_grad: &GradValue,
+        retain_graph: bool,
+        out: &mut Vec<Option<GradValue>>,
+    );
+}
+
+/// A concrete `GradFnTrait<T>` plus a reusable per-operand scratch buffer, seen
+/// through the erased [`ErasedGradFn`] interface.
+struct TypedGradFn<T: FloatRepr> {
+    inner: Box<dyn GradFnTrait<T>>,
+    scratch: Vec<Option<GraphTensor<T>>>,
+}
+
+impl<T: FloatRepr> ErasedGradFn for TypedGradFn<T> {
+    fn compute(
+        &mut self,
+        in_grad: &GradValue,
+        retain_graph: bool,
+        out: &mut Vec<Option<GradValue>>,
+    ) {
+        let typed_in = T::ref_grad_value(in_grad);
+        self.inner
+            .compute_operands_grad(typed_in, retain_graph, &mut self.scratch);
+        // Hand the typed results to the plan as erased slots, recycling the
+        // scratch buffer (no per-node allocation after warmup).
+        out.clear();
+        out.extend(
+            self.scratch
+                .drain(..)
+                .map(|grad| grad.map(T::into_grad_value)),
+        );
+    }
+}
+
+/// Backward rule for a differentiable cast.
+///
+/// The upstream gradient has the destination dtype and the output must have the
+/// source dtype (the invariant "a gradient has its input's dtype"). The reverse
+/// conversion is applied by reusing the *forward* cast op, so a higher-order
+/// differentiation through a cast keeps working: the reverse cast itself gets an
+/// edge.
+struct ErasedCastGradFn {
+    src: FloatKind,
+    dst: FloatKind,
+}
+
+impl ErasedGradFn for ErasedCastGradFn {
+    fn compute(
+        &mut self,
+        in_grad: &GradValue,
+        _retain_graph: bool,
+        out: &mut Vec<Option<GradValue>>,
+    ) {
+        let grad = match (self.src, self.dst) {
+            (FloatKind::F32, FloatKind::F32) => match in_grad {
+                GradValue::F32(g) => GradValue::F32(g.copy_s()),
+                GradValue::F64(_) => unreachable!("cast grad dtype mismatch"),
+            },
+            (FloatKind::F64, FloatKind::F64) => match in_grad {
+                GradValue::F64(g) => GradValue::F64(g.copy_s()),
+                GradValue::F32(_) => unreachable!("cast grad dtype mismatch"),
+            },
+            (FloatKind::F64, FloatKind::F32) => match in_grad {
+                GradValue::F32(g) => GradValue::F64(g.cast::<f64>()),
+                GradValue::F64(_) => unreachable!("cast grad dtype mismatch"),
+            },
+            (FloatKind::F32, FloatKind::F64) => {
+                #[cfg(feature = "allow_lossy_casts")]
+                {
+                    match in_grad {
+                        GradValue::F64(g) => GradValue::F32(g.cast_lossy::<f32>()),
+                        GradValue::F32(_) => unreachable!("cast grad dtype mismatch"),
+                    }
+                }
+                #[cfg(not(feature = "allow_lossy_casts"))]
+                {
+                    let _ = in_grad;
+                    unreachable!("f32 -> f64 cast edge requires allow_lossy_casts")
+                }
             }
-            BackwardOpKind::MaxOp { dims, keepdim } => {
-                box_rule::<MaxOp, 1, T>(operands, MaxOp { dims, keepdim })
+        };
+
+        out.clear();
+        out.push(Some(grad));
+    }
+}
+
+/// Materialize a node's deferred edge into its erased backward rule.
+///
+/// The `f32`/`f64` match is the only place the scheduler picks a concrete float
+/// for a node; everything downstream is erased.
+pub(crate) fn materialize_grad_fn(node: &ErasedTensor) -> Option<Box<dyn ErasedGradFn>> {
+    fn make<T: FloatRepr>(source: BackwardSource) -> Box<dyn ErasedGradFn> {
+        Box::new(TypedGradFn::<T> {
+            inner: source.into_grad_fn::<T>(),
+            scratch: Vec::new(),
+        })
+    }
+
+    let dst = node.kind();
+    match node {
+        ErasedTensor::F32(g) => {
+            let source = g.node.grad_fn.as_ref()?;
+            if matches!(&source.op, BackwardOpKind::CastOp) {
+                return Some(cast_grad_fn(source, dst));
             }
-            BackwardOpKind::CopyDOp => box_rule::<CopyDOp, 1, T>(operands, CopyDOp {}),
-            BackwardOpKind::UnsqueezeOp { dim } => {
-                box_rule::<UnsqueezeOp, 1, T>(operands, UnsqueezeOp { dim })
+            Some(make::<f32>((**source).clone()))
+        }
+        ErasedTensor::F64(g) => {
+            let source = g.node.grad_fn.as_ref()?;
+            if matches!(&source.op, BackwardOpKind::CastOp) {
+                return Some(cast_grad_fn(source, dst));
             }
-            BackwardOpKind::SqueezeOp { dim } => {
-                box_rule::<SqueezeOp, 1, T>(operands, SqueezeOp { dim })
-            }
-            BackwardOpKind::TransposeOp { dim_a, dim_b } => {
-                box_rule::<TransposeOp, 1, T>(operands, TransposeOp { dim_a, dim_b })
-            }
-            BackwardOpKind::ExpandOp { dim } => box_rule::<ExpandOp, 1, T>(operands, ExpandOp { dim }),
-            BackwardOpKind::BroadcastOp { old_shape } => {
-                box_rule::<BroadcastOp, 1, T>(operands, BroadcastOp { old_shape })
-            }
+            Some(make::<f64>((**source).clone()))
         }
     }
 }
 
+/// Build the erased rule for a cast edge, reading the source dtype off its single
+/// operand (the node's own dtype is the destination).
+fn cast_grad_fn(source: &BackwardSource, dst: FloatKind) -> Box<dyn ErasedGradFn> {
+    let src = source.operands()[0].clone().into_erased().kind();
+    Box::new(ErasedCastGradFn { src, dst })
+}
+
 /// Generic backward-op container: stores operands, arity N, the operation state,
 /// and the dtype `T` of the operands. Autograd only ever *runs* for float dtypes
-/// (see `impl<T: Float> GraphTensor<T>`), and `BackwardSource` freezes *building*
-/// an edge independently of any rule — but the concrete `NBackwardOp` is produced
-/// by [`BackwardSource::into_grad_fn`] at backward time.
+/// (see `impl<T: FloatRepr> GraphTensor<T>`), and `BackwardSource` freezes
+/// *building* an edge independently of any rule — but the concrete
+/// `NBackwardOp`, fully typed in `T`, is produced by
+/// [`BackwardSource::into_grad_fn`] at backward time and then hidden behind the
+/// erased `ErasedGradFn` the plan holds.
 pub struct NBackwardOp<Op, const N: usize, T: Dtype = f64> {
     pub(crate) operands: [GraphTensor<T>; N],
     pub(crate) op: Op, // Holds the actual struct (and its fields like `dim`)

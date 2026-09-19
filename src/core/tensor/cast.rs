@@ -12,11 +12,12 @@
 //! - [`crate::core::dtype::DangerousCastFrom`] — partial/panicking, available as
 //!   `.cast_dangerous::<U>()` only with the `allow_dangerous_casts` feature.
 
-use crate::core::dtype::{CastFrom, Dtype, Numeric};
+use crate::core::autograd::grad_fn::{BackwardOpKind, maybe_edge};
 #[cfg(feature = "allow_dangerous_casts")]
 use crate::core::dtype::DangerousCastFrom;
 #[cfg(feature = "allow_lossy_casts")]
 use crate::core::dtype::LossyCastFrom;
+use crate::core::dtype::{CastBackward, CastFrom, Dtype, Numeric};
 use crate::core::node::TensorNode;
 use crate::core::storage::TensorStorage;
 use crate::core::tensor::{FreeTensor, GraphTensor};
@@ -39,15 +40,23 @@ impl<T: Dtype> GraphTensor<T> {
     /// Element-wise exact conversion to dtype `U`, allocating a new tensor.
     ///
     /// Compile-time legality: this method only exists where `U: CastFrom<T>`
-    /// holds (exact, infallible conversions). The result keeps the source's
-    /// `requires_grad` flag but carries no graph edge — casts are currently a
-    /// non-differentiable data transform.
-    pub fn cast<U: CastFrom<T>>(&self) -> GraphTensor<U> {
+    /// holds (exact, infallible conversions). When the conversion is also
+    /// differentiable — both dtypes are floats and the reverse cast is legal in
+    /// this build, witnessed by `U: CastBackward<T>` — the result carries a graph
+    /// edge whose backward applies the reverse conversion to the upstream
+    /// gradient. Otherwise the cast is a graph boundary (`requires_grad` does not
+    /// propagate).
+    pub fn cast<U: CastFrom<T> + CastBackward<T>>(&self) -> GraphTensor<U> {
         let storage = cast_storage(&self.node.storage, U::cast_from);
+        let grad_fn = if U::GRAD_EDGE {
+            maybe_edge(&[self], BackwardOpKind::CastOp)
+        } else {
+            None
+        };
         let node = TensorNode {
             storage,
-            requires_grad: self.node.requires_grad,
-            grad_fn: None,
+            requires_grad: grad_fn.is_some() && self.node.requires_grad,
+            grad_fn,
         };
         GraphTensor {
             node: Rc::new(node),
@@ -56,13 +65,22 @@ impl<T: Dtype> GraphTensor<T> {
 
     /// Element-wise lossy (but total) conversion to dtype `U`, allocating a new
     /// tensor. Compiled only with the `allow_lossy_casts` feature.
+    ///
+    /// Differentiable exactly like [`GraphTensor::cast`]: with the feature on,
+    /// the narrowing `f64 -> f32` edge exists and its backward is the exact
+    /// `f32 -> f64` widening.
     #[cfg(feature = "allow_lossy_casts")]
-    pub fn cast_lossy<U: LossyCastFrom<T>>(&self) -> GraphTensor<U> {
+    pub fn cast_lossy<U: LossyCastFrom<T> + CastBackward<T>>(&self) -> GraphTensor<U> {
         let storage = cast_storage(&self.node.storage, U::lossy_cast_from);
+        let grad_fn = if U::GRAD_EDGE {
+            maybe_edge(&[self], BackwardOpKind::CastOp)
+        } else {
+            None
+        };
         let node = TensorNode {
             storage,
-            requires_grad: self.node.requires_grad,
-            grad_fn: None,
+            requires_grad: grad_fn.is_some() && self.node.requires_grad,
+            grad_fn,
         };
         GraphTensor {
             node: Rc::new(node),
@@ -72,13 +90,20 @@ impl<T: Dtype> GraphTensor<T> {
     /// Element-wise dangerous (panicking on out-of-domain inputs) conversion to
     /// dtype `U`, allocating a new tensor. Compiled only with the
     /// `allow_dangerous_casts` feature.
+    ///
+    /// Never differentiable: no float↔float pair is dangerous.
     #[cfg(feature = "allow_dangerous_casts")]
-    pub fn cast_dangerous<U: DangerousCastFrom<T>>(&self) -> GraphTensor<U> {
+    pub fn cast_dangerous<U: DangerousCastFrom<T> + CastBackward<T>>(&self) -> GraphTensor<U> {
         let storage = cast_storage(&self.node.storage, U::dangerous_cast_from);
+        let grad_fn = if U::GRAD_EDGE {
+            maybe_edge(&[self], BackwardOpKind::CastOp)
+        } else {
+            None
+        };
         let node = TensorNode {
             storage,
-            requires_grad: self.node.requires_grad,
-            grad_fn: None,
+            requires_grad: grad_fn.is_some() && self.node.requires_grad,
+            grad_fn,
         };
         GraphTensor {
             node: Rc::new(node),

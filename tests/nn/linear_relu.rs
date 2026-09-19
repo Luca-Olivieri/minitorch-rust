@@ -39,7 +39,7 @@ fn linear_relu_forward_and_backward() {
     }
 
     // dx = W^T @ drelu, where the relu mask zeroes the dead units.
-    let dx = grads_map.get(&x.to_key()).unwrap();
+    let dx = grads_map.get(&x).unwrap();
     assert_eq!(dx.shape(), &[2, 3]);
     let expected_dx = vec![
         vec![0.07844817624333589, 1.086312925282642, 0.8115637054824661],
@@ -60,7 +60,7 @@ fn linear_relu_forward_and_backward() {
     // and its gradient wrt x is constant (disconnected node).
     let dx_grads_map = dx.backward(true);
     assert!(
-        !dx_grads_map.contains_key(&x.to_key()),
+        dx_grads_map.get(&x).is_none(),
         "d( dx )/dx should be disconnected"
     );
 }

@@ -49,22 +49,23 @@ fn int_sub_div_neg() {
 }
 
 #[test]
-fn int_sub_neg_carry_graph_edges() {
-    // Signed ints build the same differentiable graph structure as floats;
-    // a backward *run* still only exists for `T: Float`.
+fn int_ops_are_graph_boundaries() {
+    // Integer arithmetic is non-differentiable: ops record no gradient edge and
+    // do not propagate `requires_grad`, even from a flagged leaf (a backward run
+    // only ever exists for `T: Float` regardless).
     let a = GraphTensor::<i64>::wrap(vec![5, -7], true);
     let neg = -&a;
     let diff = &neg - &GraphTensor::<i64>::wrap(1, false);
-    assert!(neg.requires_grad());
-    assert!(diff.requires_grad());
+    assert!(!neg.requires_grad());
+    assert!(!diff.requires_grad());
 }
 
 #[test]
 fn unsigned_sub_div() {
     // Unsigned ints gained forward-only sub/div via the deferred-dispatch
-    // refactor: these build forward edges (no GradRule bound needed), but a
-    // backward pass only ever exists for floats. sub wraps mod 2^N; div
-    // truncates toward zero (Rust/NumPy semantics), like PyTorch uint ops.
+    // refactor (no GradRule bound needed). They are non-differentiable, so they
+    // record no gradient edge. sub wraps mod 2^N; div truncates toward zero
+    // (Rust/NumPy semantics), like PyTorch uint ops.
     let a = GraphTensor::<u8>::wrap(vec![10, 20, 30, 40], false);
     let b = GraphTensor::<u8>::wrap(vec![1, 2, 3, 4], false);
 
@@ -76,11 +77,12 @@ fn unsigned_sub_div() {
     assert_eq!(*((&a - 1)).at(&[0]), 9);
     assert_eq!(*((&a / 8)).at(&[1]), 2);
 
-    // Unsigned tensors carry the same differentiable graph structure as signed
-    // ones (a rule is only materialized for a backward run, never for ints).
+    // Unsigned ints are non-differentiable, so these ops are graph boundaries:
+    // no edge and no `requires_grad` propagation (a backward run never exists
+    // for ints anyway).
     let u = GraphTensor::<u32>::wrap(vec![7], true);
     let d = &u - &GraphTensor::<u32>::wrap(3, false);
-    assert!(d.requires_grad());
+    assert!(!d.requires_grad());
 }
 
 #[test]
@@ -180,8 +182,8 @@ fn f32_backward() {
 
     let r = (&a * &b).sum(&[], false);
     let grads = r.backward(true);
-    let da = grads.get(&a.to_key()).unwrap();
-    let db = grads.get(&b.to_key()).unwrap();
+    let da = grads.get(&a).unwrap();
+    let db = grads.get(&b).unwrap();
 
     assert_eq!(*da.at(&[0]), 1.0);
     assert_eq!(*da.at(&[1]), 5.0);
@@ -213,7 +215,7 @@ fn copy_d_attaches_grad_edge() {
     let y = x.copy_d();
     let z = (&y * 2.0_f64).sum(&[], false);
     let grads = z.backward(true);
-    let dx = grads.get(&x.to_key()).unwrap();
+    let dx = grads.get(&x).unwrap();
 
     assert_eq!(*dx.at(&[0]), 2.0);
     assert_eq!(*dx.at(&[2]), 2.0);
@@ -237,7 +239,7 @@ fn typed_labels_feed_f64_loss_pipeline() {
     assert_shape(&loss, &[]);
 
     let grads = loss.backward(true);
-    let dlogits = grads.get(&logits.to_key()).unwrap();
+    let dlogits = grads.get(&logits).unwrap();
     assert_eq!(*dlogits.at(&[0, 0]), -1.0 / 9.0);
     assert_eq!(*dlogits.at(&[1, 2]), -1.0 / 9.0);
     assert_eq!(*dlogits.at(&[2, 1]), -1.0 / 9.0);
@@ -270,8 +272,8 @@ fn maximum_backward_through_bool_mask() {
 
     let out = GraphTensor::maximum(&a, &b).sum(&[], false);
     let grads = out.backward(true);
-    let da = grads.get(&a.to_key()).unwrap();
-    let db = grads.get(&b.to_key()).unwrap();
+    let da = grads.get(&a).unwrap();
+    let db = grads.get(&b).unwrap();
 
     assert_eq!(*da.at(&[0]), 0.0);
     assert_eq!(*da.at(&[1]), 1.0);
@@ -292,4 +294,108 @@ fn exact_cast_chain_widens() {
 
     let f = GraphTensor::<f32>::wrap(vec![0.25], false).cast::<f64>();
     assert_eq!(*f.at(&[0]), 0.25);
+}
+
+#[test]
+fn identity_cast_is_differentiable() {
+    let x = GraphTensor::<f64>::wrap(vec![1.0, 2.0, 3.0], true);
+    let y = x.cast::<f64>();
+    assert!(y.requires_grad());
+
+    let loss = (&y * 2.0_f64).sum(&[], false);
+    let grads = loss.backward(false);
+    let dx = grads.get(&x).unwrap();
+
+    assert_eq!(*dx.at(&[0]), 2.0);
+    assert_eq!(*dx.at(&[2]), 2.0);
+}
+
+#[cfg(not(feature = "allow_lossy_casts"))]
+#[test]
+fn widen_f32_to_f64_is_forward_only_without_lossy() {
+    let x = GraphTensor::<f32>::wrap(vec![1.0, 2.0], true);
+    let y = x.cast::<f64>();
+
+    assert_eq!(*y.at(&[0]), 1.0);
+    assert!(!y.requires_grad());
+}
+
+#[cfg(feature = "allow_lossy_casts")]
+mod differentiable_casts {
+    use super::*;
+
+    #[test]
+    fn widen_f32_to_f64_backward_reaches_f32_leaf() {
+        let x = GraphTensor::<f32>::wrap(vec![1.0, 2.0, 3.0], true);
+        let y = x.cast::<f64>();
+        assert!(y.requires_grad());
+
+        let loss = (&y * 3.0_f64).sum(&[], false);
+        let grads = loss.backward(false);
+        let dx = grads.get(&x).unwrap();
+
+        assert_eq!(*dx.at(&[0]), 3.0_f32);
+        assert_eq!(*dx.at(&[1]), 3.0_f32);
+        assert_eq!(*dx.at(&[2]), 3.0_f32);
+    }
+
+    #[test]
+    fn narrow_f64_to_f32_backward_reaches_f64_leaf() {
+        let x = GraphTensor::<f64>::wrap(vec![1.0, 2.0, 3.0], true);
+        let y = x.cast_lossy::<f32>();
+        assert!(y.requires_grad());
+
+        let loss = (&y * 3.0_f32).sum(&[], false);
+        let grads = loss.backward(false);
+        let dx = grads.get(&x).unwrap();
+
+        assert_eq!(*dx.at(&[0]), 3.0_f64);
+        assert_eq!(*dx.at(&[2]), 3.0_f64);
+    }
+
+    #[test]
+    fn mixed_graph_keeps_one_gradient_per_leaf_dtype() {
+        let a = GraphTensor::<f32>::wrap(vec![2.0, 4.0], true);
+        let b = GraphTensor::<f64>::wrap(vec![1.0, 5.0], true);
+
+        let a64 = a.cast::<f64>();
+        let out = (&a64 * &b).sum(&[], false);
+        let grads = out.backward(false);
+
+        let da = grads.get(&a).unwrap();
+        assert_eq!(*da.at(&[0]), 1.0_f32);
+        assert_eq!(*da.at(&[1]), 5.0_f32);
+
+        let db = grads.get(&b).unwrap();
+        assert_eq!(*db.at(&[0]), 2.0_f64);
+        assert_eq!(*db.at(&[1]), 4.0_f64);
+
+        assert_eq!(grads.len(), 2);
+    }
+
+    #[test]
+    fn int_to_float_cast_is_still_a_boundary() {
+        let x = GraphTensor::<i64>::wrap(vec![1, 2], true);
+        let y = x.cast_lossy::<f64>();
+
+        assert_eq!(*y.at(&[0]), 1.0);
+        assert!(!y.requires_grad());
+    }
+
+    #[test]
+    fn cast_is_twice_differentiable() {
+        let x = GraphTensor::<f32>::wrap(vec![2.0, 3.0], true);
+        let y = x.cast::<f64>();
+
+        let loss = (&y * &y).sum(&[], false);
+        let grads = loss.backward(true);
+        let dy = grads.get(&y).unwrap();
+        assert_eq!(*dy.at(&[0]), 4.0_f64);
+        assert_eq!(*dy.at(&[1]), 6.0_f64);
+
+        let second = dy.sum(&[], false).backward(false);
+        let d2x = second.get(&x).unwrap();
+        assert_eq!(*d2x.at(&[0]), 2.0_f32);
+        assert_eq!(*d2x.at(&[1]), 2.0_f32);
+    }
 }

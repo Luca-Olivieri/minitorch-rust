@@ -32,7 +32,7 @@ fn cast_bool_to_int() {
     assert_eq!(c.numel(), 3);
     assert_eq!(c.at(&[0]), &1);
     assert_eq!(c.at(&[2]), &1);
-    assert!(c.requires_grad());
+    assert!(!c.requires_grad());
 }
 
 #[test]

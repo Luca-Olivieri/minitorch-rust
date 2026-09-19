@@ -53,11 +53,11 @@ fn simple_operation_forward_and_backward() {
     assert_values(&x, &[6.0; 6]);
 
     // ∂x/∂a = b = 3, ∂x/∂b = a = 2 (seed gradient is 1).
-    let da = grads_map.get(&a.to_key()).unwrap();
+    let da = grads_map.get(&a).unwrap();
     assert_shape(da, &shape);
     assert_values(da, &[3.0; 6]);
 
-    let db = grads_map.get(&b.to_key()).unwrap();
+    let db = grads_map.get(&b).unwrap();
     assert_shape(db, &shape);
     assert_values(db, &[2.0; 6]);
 
@@ -65,11 +65,11 @@ fn simple_operation_forward_and_backward() {
     // (node disconnected); ∂a/∂b = 1.
     let da_grads_map = da.backward(true);
     assert!(
-        !da_grads_map.contains_key(&a.to_key()),
+        da_grads_map.get(&a).is_none(),
         "d2x/da2 should be disconnected"
     );
 
-    let d2a_db = da_grads_map.get(&b.to_key()).unwrap();
+    let d2a_db = da_grads_map.get(&b).unwrap();
     assert_shape(d2a_db, &shape);
     assert_values(d2a_db, &[1.0; 6]);
 }
@@ -99,15 +99,15 @@ fn complex_operation_forward_and_backward() {
     assert_shape(&r, &shape);
     assert_values(&r, &[expected_r; 6]);
 
-    let da = grads_map.get(&a.to_key()).unwrap();
+    let da = grads_map.get(&a).unwrap();
     assert_shape(da, &shape);
     assert_values(da, &[-0.5; 6]);
 
-    let db = grads_map.get(&b.to_key()).unwrap();
+    let db = grads_map.get(&b).unwrap();
     assert_shape(db, &shape);
     assert_values(db, &[1.0 / 6.0; 6]);
 
-    let dc = grads_map.get(&c.to_key()).unwrap();
+    let dc = grads_map.get(&c).unwrap();
     assert_shape(dc, &shape);
     assert_values(dc, &[-0.25; 6]);
 
@@ -117,20 +117,20 @@ fn complex_operation_forward_and_backward() {
     let db_grads_map = db.backward(true);
     let dc_grads_map = dc.backward(true);
 
-    assert_values(da_grads_map.get(&a.to_key()).unwrap(), &[0.125; 6]);
-    assert_values(da_grads_map.get(&b.to_key()).unwrap(), &[-0.125; 6]);
-    assert_values(da_grads_map.get(&c.to_key()).unwrap(), &[0.0625; 6]);
+    assert_values(da_grads_map.get(&a).unwrap(), &[0.125; 6]);
+    assert_values(da_grads_map.get(&b).unwrap(), &[-0.125; 6]);
+    assert_values(da_grads_map.get(&c).unwrap(), &[0.0625; 6]);
 
-    assert_values(db_grads_map.get(&a.to_key()).unwrap(), &[-0.125; 6]);
+    assert_values(db_grads_map.get(&a).unwrap(), &[-0.125; 6]);
     assert_values(
-        db_grads_map.get(&b.to_key()).unwrap(),
+        db_grads_map.get(&b).unwrap(),
         &[-0.09722222222222224; 6],
     );
-    assert_values(db_grads_map.get(&c.to_key()).unwrap(), &[0.0625; 6]);
+    assert_values(db_grads_map.get(&c).unwrap(), &[0.0625; 6]);
 
-    assert_values(dc_grads_map.get(&a.to_key()).unwrap(), &[0.0625; 6]);
-    assert_values(dc_grads_map.get(&b.to_key()).unwrap(), &[0.0625; 6]);
-    assert_values(dc_grads_map.get(&c.to_key()).unwrap(), &[0.03125; 6]);
+    assert_values(dc_grads_map.get(&a).unwrap(), &[0.0625; 6]);
+    assert_values(dc_grads_map.get(&b).unwrap(), &[0.0625; 6]);
+    assert_values(dc_grads_map.get(&c).unwrap(), &[0.03125; 6]);
 }
 
 #[test]
@@ -147,23 +147,23 @@ fn matmul_forward_and_backward() {
     assert_values(&x, &[3.0; 8]);
 
     // ∂x/∂a = x.grad @ b^T: [2,4] @ [4,3] of ones = 4.
-    let da = grads_map.get(&a.to_key()).unwrap();
+    let da = grads_map.get(&a).unwrap();
     assert_shape(da, &[2, 3]);
     assert_values(da, &[4.0; 6]);
 
     // ∂x/∂b = a^T @ x.grad: [3,2] @ [2,4] of ones = 2.
-    let db = grads_map.get(&b.to_key()).unwrap();
+    let db = grads_map.get(&b).unwrap();
     assert_shape(db, &[3, 4]);
     assert_values(db, &[2.0; 12]);
 
     // a.grad = x.grad @ b^T is constant in `a` (disconnected), and ∂(a.grad)/∂b = 2.
     let da_grads_map = da.backward(true);
     assert!(
-        !da_grads_map.contains_key(&a.to_key()),
+        da_grads_map.get(&a).is_none(),
         "d2x/da2 should be disconnected"
     );
 
-    let d2a_db = da_grads_map.get(&b.to_key()).unwrap();
+    let d2a_db = da_grads_map.get(&b).unwrap();
     assert_shape(d2a_db, &[3, 4]);
     assert_values(d2a_db, &[2.0; 12]);
 }

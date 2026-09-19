@@ -185,7 +185,7 @@ fn sum_backward_broadcasts_grad_to_all_reduced_dims() {
     let out = a.sum(&[0, 2], false);
 
     let grads = out.backward(true);
-    let da = grads.get(&a.to_key()).unwrap();
+    let da = grads.get(&a).unwrap();
     assert_eq!(da.shape(), &[2, 2, 3]);
     for i in 0..2 {
         for j in 0..2 {
@@ -211,7 +211,7 @@ fn sum_backward_through_keepdim_broadcasts_to_input() {
     assert_eq!(out.shape(), &[2, 2, 3]);
 
     let grads = out.backward(true);
-    let da = grads.get(&a.to_key()).unwrap();
+    let da = grads.get(&a).unwrap();
     assert_eq!(da.shape(), &[2, 2, 3]);
     // `out = s * m` with s = keepdim sum over {0,2}, m the multipliers:
     // backprop through `*` sums m over the axes `s` lacks, so each
@@ -235,7 +235,7 @@ fn sum_empty_dims_backward_is_ones() {
     let out = a.sum(&[], false);
 
     let grads = out.backward(true);
-    let da = grads.get(&a.to_key()).unwrap();
+    let da = grads.get(&a).unwrap();
     assert_eq!(da.shape(), &[2, 2, 3]);
     for i in 0..2 {
         for j in 0..2 {
@@ -252,7 +252,7 @@ fn max_backward_flows_only_to_maxima() {
     let out = a.max(&[0, 2], false);
 
     let grads = out.backward(true);
-    let da = grads.get(&a.to_key()).unwrap();
+    let da = grads.get(&a).unwrap();
     assert_eq!(da.shape(), &[2, 2, 3]);
 
     // max over {0, 2} per j: 8 for j=0 (at i=1,k=2), 11 for j=1 (at i=1,k=2)
@@ -283,7 +283,7 @@ fn max_backward_through_keepdim_flows_only_to_maxima() {
         );
 
     let grads = out.backward(true);
-    let da = grads.get(&a.to_key()).unwrap();
+    let da = grads.get(&a).unwrap();
     assert_eq!(da.shape(), &[2, 2, 3]);
     // analogous to the sum case: the max-slice gradient ds[j] = Σ_{i,k} m[i,j,k]
     // (21 / 30) is expanded over {0,2} and gated by the per-slice max mask

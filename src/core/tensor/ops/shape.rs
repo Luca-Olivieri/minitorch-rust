@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::core::autograd::grad_fn::{BackwardOpKind, BackwardSource};
+use crate::core::autograd::grad_fn::BackwardOpKind;
 use crate::core::dtype::{Dtype, Numeric};
 use crate::core::node::TensorNode;
 use crate::core::storage::TensorStorage;
@@ -12,12 +12,7 @@ impl<T: Numeric> GraphTensor<T> {
     pub fn unsqueeze(&self, dim: usize) -> GraphTensor<T> {
         apply_tensor_op(
             |ops: &[&TensorStorage<T>; 1]| TensorStorage::unsqueeze(ops[0], dim),
-            Some(|operands: [GraphTensor<T>; 1]| {
-                Box::new(BackwardSource::new(
-                    operands.iter().map(|o| o.copy_s()).collect(),
-                    BackwardOpKind::UnsqueezeOp { dim },
-                ))
-            }),
+            Some(BackwardOpKind::UnsqueezeOp { dim }),
             &[self],
         )
     }
@@ -25,12 +20,7 @@ impl<T: Numeric> GraphTensor<T> {
     pub fn squeeze(&self, dim: usize) -> GraphTensor<T> {
         apply_tensor_op(
             |ops: &[&TensorStorage<T>; 1]| TensorStorage::squeeze(ops[0], dim),
-            Some(|operands: [GraphTensor<T>; 1]| {
-                Box::new(BackwardSource::new(
-                    operands.iter().map(|o| o.copy_s()).collect(),
-                    BackwardOpKind::SqueezeOp { dim },
-                ))
-            }),
+            Some(BackwardOpKind::SqueezeOp { dim }),
             &[self],
         )
     }
@@ -38,12 +28,7 @@ impl<T: Numeric> GraphTensor<T> {
     pub fn transpose(&self, dim_a: usize, dim_b: usize) -> GraphTensor<T> {
         apply_tensor_op(
             |ops: &[&TensorStorage<T>; 1]| TensorStorage::transpose(ops[0], dim_a, dim_b),
-            Some(|operands: [GraphTensor<T>; 1]| {
-                Box::new(BackwardSource::new(
-                    operands.iter().map(|o| o.copy_s()).collect(),
-                    BackwardOpKind::TransposeOp { dim_a, dim_b },
-                ))
-            }),
+            Some(BackwardOpKind::TransposeOp { dim_a, dim_b }),
             &[self],
         )
     }
@@ -51,12 +36,7 @@ impl<T: Numeric> GraphTensor<T> {
     pub fn expand(&self, dim: usize, times: usize) -> GraphTensor<T> {
         apply_tensor_op(
             |ops: &[&TensorStorage<T>; 1]| TensorStorage::expand(ops[0], dim, times),
-            Some(|operands: [GraphTensor<T>; 1]| {
-                Box::new(BackwardSource::new(
-                    operands.iter().map(|o| o.copy_s()).collect(),
-                    BackwardOpKind::ExpandOp { dim },
-                ))
-            }),
+            Some(BackwardOpKind::ExpandOp { dim }),
             &[self],
         )
     }
@@ -68,13 +48,8 @@ impl<T: Numeric> GraphTensor<T> {
     pub fn broadcast_to_shape(&self, target_shape: &[usize]) -> GraphTensor<T> {
         apply_tensor_op(
             |ops: &[&TensorStorage<T>; 1]| TensorStorage::broadcast_to_shape(ops[0], target_shape),
-            Some(|operands: [GraphTensor<T>; 1]| {
-                Box::new(BackwardSource::new(
-                    operands.iter().map(|o| o.copy_s()).collect(),
-                    BackwardOpKind::BroadcastOp {
-                        old_shape: operands[0].shape().clone(),
-                    },
-                ))
+            Some(BackwardOpKind::BroadcastOp {
+                old_shape: self.shape().clone(),
             }),
             &[self],
         )
@@ -95,11 +70,10 @@ impl<T: Dtype> GraphTensor<T> {
         let storages: Vec<&TensorStorage<T>> = tensors.iter().map(|t| &t.node.storage).collect();
         let out_store = TensorStorage::stack(&storages);
 
-        let requires_grad = tensors.iter().any(|t| t.requires_grad());
-
+        // Non-differentiable: a graph boundary (no edge, no grad propagation).
         let out_node = TensorNode {
             storage: out_store,
-            requires_grad,
+            requires_grad: false,
             grad_fn: None,
         };
 

@@ -39,11 +39,12 @@ mod sealed {
     pub trait Sealed {}
 }
 
+pub use casts::CastBackward;
 pub use casts::CastFrom;
-#[cfg(feature = "allow_lossy_casts")]
-pub use casts::LossyCastFrom;
 #[cfg(feature = "allow_dangerous_casts")]
 pub use casts::DangerousCastFrom;
+#[cfg(feature = "allow_lossy_casts")]
+pub use casts::LossyCastFrom;
 
 use std::fmt;
 
@@ -52,7 +53,20 @@ use std::fmt;
 /// Sealed to the primitives implemented below, so the dtype universe is a
 /// closed set known at compile time.
 #[allow(private_bounds)]
-pub trait Dtype: sealed::Sealed + Copy + Clone + PartialEq + fmt::Debug + Send + Sync + 'static {}
+pub trait Dtype:
+    sealed::Sealed + Copy + Clone + PartialEq + fmt::Debug + Send + Sync + 'static
+{
+    /// Compile-time autograd participation: `true` only for the dtypes a
+    /// backward pass can run for ([`Float`]).
+    ///
+    /// Forward ops use this as a compile-time witness to decide whether to
+    /// record a gradient edge: non-differentiable dtypes never attach one, so
+    /// their ops are graph boundaries and do not propagate `requires_grad`.
+    /// The value is a constant per dtype, so non-float instantiations drop the
+    /// edge-building branch entirely (no allocation, no runtime check).
+    #[doc(hidden)]
+    const DIFFERENTIABLE: bool;
+}
 
 /// Arithmetic family (`+`, `-`, `*`, `/`, `%`), the common ground of [`Float`]
 /// and [`Integer`]. Ops that make sense for every number (e.g. `matmul`) are
@@ -118,13 +132,17 @@ pub trait Float: Signed {
 pub trait Integer: Numeric {}
 
 impl sealed::Sealed for bool {}
-impl Dtype for bool {}
+impl Dtype for bool {
+    const DIFFERENTIABLE: bool = false;
+}
 
 macro_rules! impl_float_family {
     ($($t:ty),+ $(,)?) => {
         $(
             impl sealed::Sealed for $t {}
-            impl Dtype for $t {}
+            impl Dtype for $t {
+                const DIFFERENTIABLE: bool = true;
+            }
             impl Numeric for $t {
                 const ZERO: Self = 0.0;
                 const ONE: Self = 1.0;
@@ -146,7 +164,9 @@ macro_rules! impl_integer_family {
     ($($t:ty),+ $(,)?) => {
         $(
             impl sealed::Sealed for $t {}
-            impl Dtype for $t {}
+            impl Dtype for $t {
+                const DIFFERENTIABLE: bool = false;
+            }
             impl Numeric for $t {
                 const ZERO: Self = 0;
                 const ONE: Self = 1;

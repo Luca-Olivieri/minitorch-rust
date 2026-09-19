@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::core::autograd::grad_fn::{BackwardOpKind, BackwardSource};
+use crate::core::autograd::grad_fn::{BackwardOpKind, maybe_edge};
 use crate::core::dtype::{Float, Numeric};
 use crate::core::node::TensorNode;
 use crate::core::storage::TensorStorage;
@@ -30,14 +30,9 @@ impl<T: Numeric> GraphTensor<T> {
                     reduced
                 }
             },
-            Some(|operands: [GraphTensor<T>; 1]| {
-                Box::new(BackwardSource::new(
-                    operands.iter().map(|o| o.copy_s()).collect(),
-                    BackwardOpKind::SumOp {
-                        dims: dims.clone(),
-                        keepdim,
-                    },
-                ))
+            Some(BackwardOpKind::SumOp {
+                dims: dims.clone(),
+                keepdim,
             }),
             &[self],
         )
@@ -60,14 +55,9 @@ impl<T: Numeric> GraphTensor<T> {
                     reduced
                 }
             },
-            Some(|operands: [GraphTensor<T>; 1]| {
-                Box::new(BackwardSource::new(
-                    operands.iter().map(|o| o.copy_s()).collect(),
-                    BackwardOpKind::MaxOp {
-                        dims: dims.clone(),
-                        keepdim,
-                    },
-                ))
+            Some(BackwardOpKind::MaxOp {
+                dims: dims.clone(),
+                keepdim,
             }),
             &[self],
         )
@@ -136,14 +126,10 @@ impl<T: Numeric> GraphTensor<T> {
         // Direct [m,k] x [k,n] -> [m,n] kernel.
         let out_store = TensorStorage::matmul(&a2.node.storage, &b2.node.storage);
 
-        // Only attach a grad_fn if at least one operand requires gradients.
-        let requires_grad = a.requires_grad() || b.requires_grad();
-        let grad_fn = requires_grad.then(|| {
-            Box::new(BackwardSource::new(
-                vec![a.copy_s(), b.copy_s()],
-                BackwardOpKind::MatmulOp,
-            ))
-        });
+        // Differentiable only for float dtypes (edge-gated); `requires_grad`
+        // follows the edge.
+        let grad_fn = maybe_edge(&[a, b], BackwardOpKind::MatmulOp);
+        let requires_grad = grad_fn.is_some() && (a.requires_grad() || b.requires_grad());
 
         let out_node = TensorNode {
             storage: out_store,

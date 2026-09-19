@@ -7,6 +7,10 @@
 // no `GradRule` bound — the concrete rule is materialized at backward time,
 // when `T: Float` is known (see `BackwardSource::into_grad_fn`). Forward op
 // homes are therefore decoupled from what the backward math requires.
+//
+// Edge hygiene (Stage 6a): an op records an edge only when `T::DIFFERENTIABLE`
+// (see `maybe_edge`), so integer/bool ops are graph boundaries — no edge and no
+// `requires_grad` propagation.
 
 macro_rules! impl_tensor_binary_ops {
     // Differentiable: `Numeric, Add, add, TensorStorage::add, AddOp;`
@@ -31,12 +35,7 @@ macro_rules! impl_tensor_binary_op_trait {
             fn $method(self, other: &GraphTensor<T>) -> GraphTensor<T> {
                 apply_tensor_op(
                     |ops: &[&TensorStorage<T>; 2]| $storage_fn(&[ops[0], ops[1]]),
-                    Some(|operands: [GraphTensor<T>; 2]| {
-                        Box::new($crate::core::autograd::grad_fn::BackwardSource::new(
-                            operands.iter().map(|o| o.copy_s()).collect(),
-                            $crate::core::autograd::grad_fn::BackwardOpKind::$grad_rule,
-                        ))
-                    }),
+                    Some($crate::core::autograd::grad_fn::BackwardOpKind::$grad_rule),
                     &[self, other],
                 )
             }
@@ -49,7 +48,7 @@ macro_rules! impl_tensor_binary_op_trait {
             fn $method(self, other: &GraphTensor<T>) -> GraphTensor<T> {
                 apply_tensor_op(
                     |ops: &[&TensorStorage<T>; 2]| $storage_fn(&[ops[0], ops[1]]),
-                    None::<fn([GraphTensor<T>; 2]) -> Box<dyn GradFnTrait<T>>>,
+                    None,
                     &[self, other],
                 )
             }
@@ -74,12 +73,7 @@ macro_rules! impl_tensor_unary_op_trait {
             fn $method(self) -> GraphTensor<T> {
                 apply_tensor_op(
                     |ops: &[&TensorStorage<T>; 1]| $storage_fn(&[ops[0]]),
-                    Some(|operands: [GraphTensor<T>; 1]| {
-                        Box::new($crate::core::autograd::grad_fn::BackwardSource::new(
-                            operands.iter().map(|o| o.copy_s()).collect(),
-                            $crate::core::autograd::grad_fn::BackwardOpKind::$grad_rule,
-                        ))
-                    }),
+                    Some($crate::core::autograd::grad_fn::BackwardOpKind::$grad_rule),
                     &[self],
                 )
             }
@@ -95,12 +89,7 @@ macro_rules! impl_tensor_binary_method {
         pub fn $method(&self, other: &GraphTensor<T>) -> GraphTensor<T> {
             apply_tensor_op(
                 |ops: &[&TensorStorage<T>; 2]| $storage_fn(&[ops[0], ops[1]]),
-                Some(|operands: [GraphTensor<T>; 2]| {
-                    Box::new($crate::core::autograd::grad_fn::BackwardSource::new(
-                        operands.iter().map(|o| o.copy_s()).collect(),
-                        $crate::core::autograd::grad_fn::BackwardOpKind::$grad_rule,
-                    ))
-                }),
+                Some($crate::core::autograd::grad_fn::BackwardOpKind::$grad_rule),
                 &[self, other],
             )
         }
@@ -109,7 +98,7 @@ macro_rules! impl_tensor_binary_method {
         pub fn $method(&self, other: &GraphTensor<T>) -> GraphTensor<T> {
             apply_tensor_op(
                 |ops: &[&TensorStorage<T>; 2]| $storage_fn(&[ops[0], ops[1]]),
-                None::<fn([GraphTensor<T>; 2]) -> Box<dyn GradFnTrait<T>>>,
+                None,
                 &[self, other],
             )
         }
@@ -135,12 +124,7 @@ macro_rules! impl_tensor_unary_method {
         pub fn $method(&self) -> GraphTensor<T> {
             apply_tensor_op(
                 |ops: &[&TensorStorage<T>; 1]| $storage_fn(&[ops[0]]),
-                Some(|operands: [GraphTensor<T>; 1]| {
-                    Box::new($crate::core::autograd::grad_fn::BackwardSource::new(
-                        operands.iter().map(|o| o.copy_s()).collect(),
-                        $crate::core::autograd::grad_fn::BackwardOpKind::$grad_rule,
-                    ))
-                }),
+                Some($crate::core::autograd::grad_fn::BackwardOpKind::$grad_rule),
                 &[self],
             )
         }
