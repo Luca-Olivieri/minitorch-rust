@@ -29,8 +29,8 @@ macro_rules! timeit {
 fn main() {
     timeit!("Datasets set up (took {elapsed})";
     let limit = 100;
-    let train_ds = CovertypeDataset::new(String::from("/Users/lucaolivieri/Desktop/CS/coding/C++/minitorch/data/covertype_train.csv"), Some(limit));
-    let val_ds = CovertypeDataset::new(String::from("/Users/lucaolivieri/Desktop/CS/coding/C++/minitorch/data/covertype_train.csv"), Some(limit));
+    let train_ds = CovertypeDataset::new(String::from("/Users/lucaolivieri/Documents/CS/coding/C++/minitorch/data/covertype_train.csv"), Some(limit));
+    let val_ds = CovertypeDataset::new(String::from("/Users/lucaolivieri/Documents/CS/coding/C++/minitorch/data/covertype_val.csv"), Some(limit));
     );
 
     timeit!("Dataloaders set up (took {elapsed})";

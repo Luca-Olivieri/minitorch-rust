@@ -1,4 +1,5 @@
-BIN ?= xor
+# BIN ?= xor
+BIN = covertype
 
 run:
 	@cargo run --bin $(BIN)
