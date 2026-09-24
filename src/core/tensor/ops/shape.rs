@@ -85,7 +85,18 @@ impl<T: Numeric> GraphTensor<T> {
         )
     }
 
-    /// Reinterpret the logical elements under a new shape, materializing into a
+    /// Extract a strided window from every dimension, materializing the result
+    /// into a fresh contiguous tensor.
+    pub fn slice_strided(&self, ranges: &[(usize, usize, usize)]) -> GraphTensor<T> {
+        apply_tensor_op(
+            |ops: &[&TensorStorage<T>; 1]| TensorStorage::slice_strided(ops[0], ranges),
+            Some(BackwardOpKind::StridedSliceOp {
+                ranges: ranges.to_vec(),
+            }),
+            &[self],
+        )
+    }
+
     /// fresh contiguous tensor. `new_shape` must preserve the element count.
     pub fn reshape(&self, new_shape: &[usize]) -> GraphTensor<T> {
         apply_tensor_op(

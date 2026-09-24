@@ -1,5 +1,5 @@
 # BIN ?= xor
-BIN = covertype
+BIN = mnist
 
 run:
 	@cargo run --bin $(BIN)

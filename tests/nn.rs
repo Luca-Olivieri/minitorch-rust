@@ -12,3 +12,12 @@ mod maxpool2d;
 
 #[path = "nn/dyn_sequential.rs"]
 mod dyn_sequential;
+
+#[path = "nn/flatten.rs"]
+mod flatten;
+
+#[path = "nn/dropout.rs"]
+mod dropout;
+
+#[path = "nn/small_cnn.rs"]
+mod small_cnn;

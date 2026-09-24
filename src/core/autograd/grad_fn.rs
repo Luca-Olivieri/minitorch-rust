@@ -7,7 +7,8 @@ use crate::core::autograd::ops::math::{
 };
 use crate::core::autograd::ops::reduce::{AvgPool2dOp, MaxOp, MaxPool2dOp, SumOp};
 use crate::core::autograd::ops::shape::{
-    BroadcastOp, CopyDOp, ExpandOp, PadOp, ReshapeOp, SliceOp, SqueezeOp, TransposeOp, UnsqueezeOp,
+    BroadcastOp, CopyDOp, ExpandOp, PadOp, ReshapeOp, SliceOp, SqueezeOp, StridedSliceOp,
+    TransposeOp, UnsqueezeOp,
 };
 use crate::core::{
     GraphTensor,
@@ -149,6 +150,11 @@ pub(crate) enum BackwardOpKind {
     SliceOp {
         ranges: Vec<(usize, usize)>,
     },
+    /// Extract a strided window from every dimension. The gradient scatters
+    /// upstream values back to the sampled input positions.
+    StridedSliceOp {
+        ranges: Vec<(usize, usize, usize)>,
+    },
     /// Reinterpret the logical elements under a new shape (materializing).
     ReshapeOp {
         new_shape: Vec<usize>,
@@ -246,6 +252,9 @@ fn box_grad_rule<T: Float>(
         BackwardOpKind::PadOp { pads } => box_rule::<PadOp, 1, T>(operands, PadOp { pads }),
         BackwardOpKind::SliceOp { ranges } => {
             box_rule::<SliceOp, 1, T>(operands, SliceOp { ranges })
+        }
+        BackwardOpKind::StridedSliceOp { ranges } => {
+            box_rule::<StridedSliceOp, 1, T>(operands, StridedSliceOp { ranges })
         }
         BackwardOpKind::ReshapeOp { new_shape } => {
             box_rule::<ReshapeOp, 1, T>(operands, ReshapeOp { new_shape })

@@ -1,4 +1,13 @@
-use crate::core::{GraphTensor, autograd::grad_fn::*, dtype::Numeric, tensor::AbstractTensor};
+use std::rc::Rc;
+
+use crate::core::{
+    GraphTensor,
+    autograd::grad_fn::*,
+    dtype::Numeric,
+    node::TensorNode,
+    storage::TensorStorage,
+    tensor::{AbstractTensor, TensorNodeAccess},
+};
 
 #[derive(Debug)]
 pub struct CopyDOp {}
@@ -176,6 +185,42 @@ impl<T: Numeric> GradRule<1, T> for SliceOp {
             .map(|(d, &len)| (self.ranges[d].0, len - self.ranges[d].0 - self.ranges[d].1))
             .collect();
         out.push(x.requires_grad().then(|| in_grad.pad(&pads)));
+    }
+}
+
+#[derive(Debug)]
+pub struct StridedSliceOp {
+    pub ranges: Vec<(usize, usize, usize)>,
+}
+
+impl<T: Numeric> GradRule<1, T> for StridedSliceOp {
+    fn compute_grad(
+        &self,
+        operands: &[GraphTensor<T>; 1],
+        in_grad: &GraphTensor<T>,
+        _retain_graph: bool,
+        out: &mut Vec<Option<GraphTensor<T>>>,
+    ) {
+        out.push(operands[0].requires_grad().then(|| {
+            let dy_storage = &TensorNodeAccess::get_node(in_grad).storage;
+            let dx = TensorStorage::slice_strided_backward(
+                dy_storage,
+                operands[0].shape(),
+                &self.ranges,
+            );
+
+            // The scatter is a graph boundary; the first-order gradient is
+            // materialized directly rather than through a higher-order unslice.
+            let out_node = TensorNode {
+                storage: dx,
+                requires_grad: false,
+                grad_fn: None,
+            };
+
+            GraphTensor {
+                node: Rc::new(out_node),
+            }
+        }));
     }
 }
 

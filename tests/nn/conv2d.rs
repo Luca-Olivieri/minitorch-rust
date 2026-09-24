@@ -1,5 +1,5 @@
 use minitorch_rust::core::GraphTensor;
-use minitorch_rust::core::nn::compute::{Conv2d, conv2d};
+use minitorch_rust::core::nn::compute::{Conv2d, Conv2dPadding, conv2d};
 use minitorch_rust::core::nn::module::Forward1;
 use minitorch_rust::core::tensor::AbstractTensor;
 
@@ -248,6 +248,96 @@ fn conv2d_module_backward_matches_reference_gradients() {
     let db = grads.get(conv.bias.as_ref().unwrap()).unwrap();
     assert_eq!(db.shape(), &[1]);
     approx(*db.at(&[0]), 4.0);
+}
+
+#[test]
+fn conv2d_same_padding_preserves_spatial_dimensions() {
+    let input = GraphTensor::new(vec![1, 1, 5, 5], 1.0, false);
+    let conv = Conv2d::new_with_options(
+        1,
+        1,
+        3,
+        1,
+        Conv2dPadding::Same,
+        1,
+        false,
+        StdRng::seed_from_u64(41),
+    );
+
+    let output = conv.forward(&input);
+    assert_eq!(output.shape(), &[1, 1, 5, 5]);
+}
+
+#[test]
+fn conv2d_supports_stride_and_dilation() {
+    let input = GraphTensor::new(vec![1, 1, 7, 7], 1.0, false);
+    let conv = Conv2d::new_with_options(
+        1,
+        1,
+        3,
+        2,
+        Conv2dPadding::Same,
+        2,
+        false,
+        StdRng::seed_from_u64(42),
+    );
+
+    let output = conv.forward(&input);
+    assert_eq!(output.shape(), &[1, 1, 4, 4]);
+}
+
+#[test]
+fn conv2d_accepts_numeric_padding_shorthand() {
+    let input = GraphTensor::new(vec![1, 1, 5, 5], 1.0, false);
+    let conv = Conv2d::new_with_options(1, 1, 3, 2, 1, 1, false, StdRng::seed_from_u64(43));
+
+    let output = conv.forward(&input);
+    assert_eq!(output.shape(), &[1, 1, 3, 3]);
+}
+
+#[test]
+fn conv2d_dilation_forward_and_backward_match_reference() {
+    let input = GraphTensor::wrap(
+        vec![vec![vec![
+            vec![1.0, 2.0, 3.0, 4.0],
+            vec![5.0, 6.0, 7.0, 8.0],
+            vec![9.0, 10.0, 11.0, 12.0],
+            vec![13.0, 14.0, 15.0, 16.0],
+        ]]],
+        true,
+    );
+    let mut conv = Conv2d::new_with_options(
+        1,
+        1,
+        2,
+        1,
+        Conv2dPadding::Valid,
+        2,
+        false,
+        StdRng::seed_from_u64(44),
+    );
+    conv.weight = GraphTensor::wrap(vec![vec![vec![vec![1.0, 2.0], vec![3.0, 4.0]]]], true);
+
+    let output = conv.forward(&input);
+    assert_eq!(output.shape(), &[1, 1, 2, 2]);
+    let expected = [78.0, 88.0, 118.0, 128.0];
+    for (flat, value) in expected.iter().enumerate() {
+        let index = unflatten(output.shape(), flat);
+        approx(*output.at(&index), *value);
+    }
+
+    let grads = output.sum(&[], false).backward(true);
+    let dx = grads.get(&input).unwrap();
+    let expected_dx = [
+        1.0, 1.0, 2.0, 2.0, //
+        1.0, 1.0, 2.0, 2.0, //
+        3.0, 3.0, 4.0, 4.0, //
+        3.0, 3.0, 4.0, 4.0,
+    ];
+    for (flat, value) in expected_dx.iter().enumerate() {
+        let index = unflatten(dx.shape(), flat);
+        approx(*dx.at(&index), *value);
+    }
 }
 
 #[test]

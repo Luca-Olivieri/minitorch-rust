@@ -362,7 +362,110 @@ impl<T: Numeric> TensorStorage<T> {
         TensorStorage::from_buffer(out_shape, out_buf)
     }
 
-    /// Reinterpret the logical elements of `a` under a new shape, producing a
+    /// Extract a strided window from every dimension, materializing the result
+    /// into a fresh contiguous buffer.
+    ///
+    /// Each range is `(start, length, step)`. The output has the same rank as
+    /// `a`, with each dimension replaced by its requested length. The input may
+    /// itself be a strided view; logical coordinates are always resolved through
+    /// `a`'s strides.
+    pub fn slice_strided(
+        a: &TensorStorage<T>,
+        ranges: &[(usize, usize, usize)],
+    ) -> TensorStorage<T> {
+        let ndim = a.shape.len();
+        if ranges.len() != ndim {
+            panic!(
+                "slice_strided requires exactly one (start, length, step) range per dimension: got {} ranges for a shape of length {}.",
+                ranges.len(),
+                ndim
+            );
+        }
+
+        for (dim, &(start, length, step)) in ranges.iter().enumerate() {
+            if length == 0 || step == 0 {
+                panic!(
+                    "slice_strided range length and step must be nonzero, got ({start}, {length}, {step}) for dimension {dim}."
+                );
+            }
+            let last = start + (length - 1) * step;
+            if last >= a.shape[dim] {
+                panic!(
+                    "slice_strided range ({start}, {length}, {step}) exceeds dimension {dim} of size {}.",
+                    a.shape[dim]
+                );
+            }
+        }
+
+        let out_shape: Vec<usize> = ranges.iter().map(|&(_, length, _)| length).collect();
+        let out_numel = compute_numel_from_shape(&out_shape);
+        let out_buf = (0..out_numel)
+            .map(|flat| {
+                let mut remaining = flat;
+                let mut input_offset = a.offset;
+                for dim in (0..ndim).rev() {
+                    let (start, length, step) = ranges[dim];
+                    let coord = remaining % length;
+                    remaining /= length;
+                    input_offset += (start + coord * step) * a.strides[dim];
+                }
+                a.buffer[input_offset]
+            })
+            .collect();
+
+        TensorStorage::from_buffer(out_shape, out_buf)
+    }
+
+    /// Gradient of [`Self::slice_strided`] with respect to its input.
+    ///
+    /// The upstream gradient is scattered back to each sampled input position;
+    /// overlapping output windows accumulate.
+    pub fn slice_strided_backward(
+        dy: &TensorStorage<T>,
+        input_shape: &[usize],
+        ranges: &[(usize, usize, usize)],
+    ) -> TensorStorage<T> {
+        let ndim = input_shape.len();
+        if ranges.len() != ndim {
+            panic!(
+                "slice_strided backward requires exactly one range per dimension: got {} ranges for a shape of length {}.",
+                ranges.len(),
+                ndim
+            );
+        }
+
+        let out_shape: Vec<usize> = ranges.iter().map(|&(_, length, _)| length).collect();
+        if dy.shape != out_shape {
+            panic!(
+                "slice_strided backward: the upstream gradient has shape {:?}, expected {:?}.",
+                dy.shape, out_shape
+            );
+        }
+
+        let mut input_strides = vec![1usize; ndim];
+        let mut stride = 1usize;
+        for dim in (0..ndim).rev() {
+            input_strides[dim] = stride;
+            stride *= input_shape[dim];
+        }
+
+        let mut out_buf = vec![T::ZERO; input_shape.iter().product()];
+        for (flat, dy_offset) in (0..dy.numel).zip(dy.strided_indices()) {
+            let mut remaining = flat;
+            let mut input_index = 0usize;
+            for dim in (0..ndim).rev() {
+                let (start, length, step) = ranges[dim];
+                let coord = remaining % length;
+                remaining /= length;
+                input_index += (start + coord * step) * input_strides[dim];
+            }
+            out_buf[input_index] += dy.buffer[dy_offset];
+        }
+
+        TensorStorage::from_buffer(input_shape.to_vec(), out_buf)
+    }
+
+    /// Reinterpret the logical elements under a new shape, materializing into a
     /// fresh contiguous buffer.
     ///
     /// A reshape *materializes*: it fixes any strided view into canonical

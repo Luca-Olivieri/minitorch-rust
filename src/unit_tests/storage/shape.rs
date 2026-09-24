@@ -76,6 +76,29 @@ fn slice_extracts_contiguous_window() {
 }
 
 #[test]
+fn slice_strided_extracts_stepped_values_and_scatters_gradients() {
+    let a = TensorStorage::from_buffer(vec![2, 4], (0..8).map(|x| x as f64).collect());
+    let s = TensorStorage::slice_strided(&a, &[(0, 2, 1), (1, 2, 2)]);
+    assert_eq!(s.shape, vec![2, 2]);
+    assert_eq!(s.buffer.as_ref(), &[1.0, 3.0, 5.0, 7.0]);
+
+    let dy = TensorStorage::from_buffer(vec![2, 2], vec![1.0, 2.0, 3.0, 4.0]);
+    let dx = TensorStorage::slice_strided_backward(&dy, &a.shape, &[(0, 2, 1), (1, 2, 2)]);
+    assert_eq!(
+        dx.buffer.as_ref(),
+        &[0.0, 1.0, 0.0, 2.0, 0.0, 3.0, 0.0, 4.0]
+    );
+}
+
+#[test]
+fn slice_strided_reads_through_input_views() {
+    let a = TensorStorage::from_buffer(vec![2, 3], (1..=6).map(|x| x as f64).collect());
+    let t = TensorStorage::transpose(&a, 0, 1);
+    let s = TensorStorage::slice_strided(&t, &[(1, 2, 1), (0, 2, 1)]);
+    assert_eq!(s.buffer.as_ref(), &[2.0, 5.0, 3.0, 6.0]);
+}
+
+#[test]
 fn reshape_materializes_a_strided_view() {
     // transpose of [2,3] -> [3,2] view with logical elements [[1,4],[2,5],[3,6]]
     let a = TensorStorage::from_buffer(vec![2, 3], (1..=6).map(|x| x as f64).collect());

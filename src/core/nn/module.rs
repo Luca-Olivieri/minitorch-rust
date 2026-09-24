@@ -55,6 +55,16 @@ pub trait Module {
         }
     }
 
+    /// Propagate a training/evaluation mode change to child modules.
+    ///
+    /// Stateless modules use this default unchanged. Stateful modules such as
+    /// Dropout override it to update their local behavior flag.
+    fn set_training(&mut self, training: bool) {
+        self.for_each_own_module_mut(&mut |_, child| {
+            child.set_training(training);
+        });
+    }
+
     /// Business rule: a module's params may be (re)frozen only while none of
     /// them has been captured into a graph. The first op that uses a param
     /// snapshots it via `copy_s`, so "captured" is exactly "the module is no

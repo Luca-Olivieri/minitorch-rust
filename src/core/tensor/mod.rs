@@ -240,6 +240,17 @@ impl<T: Dtype> GraphTensor<T> {
         }
     }
 
+    /// Build a tensor directly from a row-major flat buffer.
+    ///
+    /// The buffer length must match the number of elements described by
+    /// `shape`; validation is delegated to [`TensorStorage::from_buffer`].
+    pub fn from_flat_buffer(shape: Vec<usize>, data: Vec<T>, requires_grad: bool) -> Self {
+        let storage = TensorStorage::from_buffer(shape, data);
+        Self {
+            node: Rc::new(TensorNode::from_storage(storage, requires_grad)),
+        }
+    }
+
     pub fn copy_s(&self) -> GraphTensor<T> {
         Self {
             node: self.node.clone(),
