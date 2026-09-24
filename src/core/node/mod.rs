@@ -2,8 +2,18 @@ use crate::core::autograd::grad_fn::BackwardSource;
 use crate::core::dtype::Dtype;
 use crate::core::storage::TensorStorage;
 
-// TODO: why do I need a case for Leaf? isn't it enoough to have it None?
-
+/// Autograd metadata attached to a tensor node.
+///
+/// `None` means that the tensor does not require gradients: it is frozen, was
+/// produced by a non-differentiable boundary, or was created under `no_grad`.
+/// `Some(Leaf)` means that the tensor requires gradients but is a leaf with no
+/// backward operation of its own, such as a model parameter or a trainable leaf
+/// input. `Some(Node(source))` means that the tensor is a differentiable
+/// intermediate whose deferred backward rule is stored in `source`.
+///
+/// `Leaf` is distinct from `None` because `grad_fn` alone cannot distinguish a
+/// trainable parameter from a frozen tensor: both have no backward operation,
+/// but only the parameter participates in gradient accumulation.
 #[derive(Debug)]
 pub(crate) enum AutogradMeta {
     /// A differentiable leaf with no forward operation attached.
