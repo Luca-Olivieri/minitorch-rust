@@ -20,8 +20,8 @@ fn dropout_is_reproducible_from_the_session_seed() {
     let mut rng_b = StdRng::seed_from_u64(42);
     let dropout_b = Dropout::new(0.3, true, &mut rng_b);
 
-    let output_a = dropout_a.forward(&input);
-    let output_b = dropout_b.forward(&input);
+    let output_a = dropout_a.forward(&input, false);
+    let output_b = dropout_b.forward(&input, false);
     assert_eq!(output_a.shape(), output_b.shape());
     for index in 0..output_a.numel() {
         let coords = vec![index / 4, index % 4];
@@ -38,7 +38,7 @@ fn dropout_eval_is_identity_and_training_can_be_toggled() {
 
     dropout.eval();
     assert!(!dropout.is_training());
-    let output = dropout.forward(&input);
+    let output = dropout.forward(&input, false);
     assert_eq!(output.shape(), input.shape());
     assert!(output.requires_grad());
     for row in 0..2 {
@@ -48,7 +48,7 @@ fn dropout_eval_is_identity_and_training_can_be_toggled() {
     }
 
     dropout.train();
-    let stochastic = dropout.forward(&input);
+    let stochastic = dropout.forward(&input, false);
     assert_eq!(stochastic.shape(), input.shape());
 }
 
@@ -58,7 +58,7 @@ fn dropout_backward_uses_the_same_inverted_mask() {
     let mut rng = StdRng::seed_from_u64(11);
     let dropout = Dropout::new(0.5, true, &mut rng);
 
-    let output = dropout.forward(&input);
+    let output = dropout.forward(&input, false);
     let grads = output.sum(&[], false).backward(true);
     let dx = grads.get(&input).unwrap();
 
@@ -75,14 +75,14 @@ fn module_set_training_propagates_into_a_sequence() {
     let mut sequence = DynSequential::new().with(Dropout::new(0.3, true, &mut rng));
 
     sequence.set_training(false);
-    let eval_output = sequence.forward(&input);
+    let eval_output = sequence.forward(&input, false);
     for index in 0..eval_output.numel() {
         let coords = vec![index / 4, index % 4];
         approx(*eval_output.at(&coords), *input.at(&coords));
     }
 
     sequence.set_training(true);
-    let train_output = sequence.forward(&input);
+    let train_output = sequence.forward(&input, false);
     assert_eq!(train_output.shape(), input.shape());
 }
 

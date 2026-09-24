@@ -54,7 +54,7 @@ fn small_cnn_eval_forward_has_expected_shape() {
     let mut rng = StdRng::seed_from_u64(101);
     let model = small_cnn(&mut rng, false);
     let input = GraphTensor::new(vec![2, 1, 28, 28], 0.25, true);
-    let output = model.forward(&input);
+    let output = model.forward(&input, false);
 
     assert_eq!(output.shape(), &[2, 10]);
 }
@@ -64,7 +64,7 @@ fn small_cnn_training_backward_reaches_all_parameterized_layers() {
     let mut rng = StdRng::seed_from_u64(102);
     let mut model = small_cnn(&mut rng, true);
     let input = GraphTensor::new(vec![2, 1, 28, 28], 0.25, true);
-    let output = model.forward(&input);
+    let output = model.forward(&input, false);
     let loss = output.sum(&[], false);
     let grads = loss.backward(false);
 
@@ -96,8 +96,8 @@ fn small_cnn_is_reproducible_from_the_session_seed() {
     let model_b = small_cnn(&mut rng_b, true);
     let input = GraphTensor::new(vec![1, 1, 28, 28], 0.5, false);
 
-    let output_a = model_a.forward(&input);
-    let output_b = model_b.forward(&input);
+    let output_a = model_a.forward(&input, false);
+    let output_b = model_b.forward(&input, false);
     for index in 0..output_a.numel() {
         let coords = vec![0, index];
         assert!((*output_a.at(&coords) - *output_b.at(&coords)).abs() < 1e-12);

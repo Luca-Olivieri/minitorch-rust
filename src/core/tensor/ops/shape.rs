@@ -127,6 +127,7 @@ impl<T: Dtype> GraphTensor<T> {
         let out_node = TensorNode {
             storage: out_store,
             requires_grad: false,
+            no_grad: tensors.iter().any(|tensor| tensor.is_no_grad()),
             grad_fn: None,
         };
 

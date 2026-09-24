@@ -212,7 +212,7 @@ fn avgpool2d_module_forward_defaults_stride_to_kernel() {
     let pool = AvgPool2d::new(2, None);
     let input = GraphTensor::new(vec![1, 1, 4, 4], 2.5, false);
 
-    let out = pool.forward(&input);
+    let out = pool.forward(&input, false);
     assert_eq!(out.shape(), &[1, 1, 2, 2]);
     for b in 0..2 {
         for c in 0..2 {
@@ -226,7 +226,7 @@ fn avgpool2d_module_forward_explicit_stride() {
     let pool = AvgPool2d::new(2, Some(1));
     let input = GraphTensor::new(vec![1, 1, 4, 4], 2.0, false);
 
-    let out = pool.forward(&input);
+    let out = pool.forward(&input, false);
     assert_eq!(out.shape(), &[1, 1, 3, 3]);
     for oh in 0..3 {
         for ow in 0..3 {

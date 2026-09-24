@@ -32,12 +32,13 @@ impl XORClassifier {
 }
 
 impl Forward1 for XORClassifier {
-    fn forward(&self, input: &GraphTensor) -> GraphTensor {
-        let y1 = self.lin1.forward(input);
-        let y2 = self.relu.forward(&y1);
-        let y3 = self.lin2.forward(&y2);
-        let y4 = self.relu.forward(&y3);
-        self.lin3.forward(&y4) // logits
+    fn forward(&self, input: &GraphTensor, no_grad: bool) -> GraphTensor {
+        let input = input.with_no_grad(no_grad);
+        let y1 = self.lin1.forward(&input, no_grad);
+        let y2 = self.relu.forward(&y1, no_grad);
+        let y3 = self.lin2.forward(&y2, no_grad);
+        let y4 = self.relu.forward(&y3, no_grad);
+        self.lin3.forward(&y4, no_grad) // logits
     }
 }
 
@@ -79,7 +80,7 @@ fn xor_training_reduces_loss_and_tracks_recorded_trajectory() {
     let num_epochs = 100;
 
     // Forward the untrained model: records the seeded initialisation state.
-    let init_logits = model.forward(&inputs);
+    let init_logits = model.forward(&inputs, false);
     assert_eq!(init_logits.shape(), &[4, 2]);
     let expected_init = [
         [0.0, 0.0],
@@ -108,16 +109,16 @@ fn xor_training_reduces_loss_and_tracks_recorded_trajectory() {
 
     let mut recorded = Vec::new();
     for epoch in 1..=num_epochs {
-        let logits = model.forward(&inputs);
+        let logits = model.forward(&inputs, false);
 
         let oh = targets.one_hot(logits.shape()[1]);
-        let loss = criterion.forward(&logits, &oh);
+        let loss = criterion.forward(&logits, &oh, false);
         let grads_map = loss.backward(false);
 
         optimizer.step(&mut model, &grads_map);
 
         if (epoch - 1) % 20 == 0 {
-            let prs = softmax.forward(&logits);
+            let prs = softmax.forward(&logits, false);
             recorded.push((epoch, loss.item(), GraphTensor::dist(&prs, &oh).item()));
         }
     }

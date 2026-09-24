@@ -22,10 +22,10 @@ fn builder_and_vector_constructors_run_the_same_layers() {
     let input = GraphTensor::new(vec![2, 2], 1.0, false);
     let linear = Linear::new(2, 3, true, StdRng::seed_from_u64(7));
     let relu = ReLU::new();
-    let expected = relu.forward(&linear.forward(&input));
+    let expected = relu.forward(&linear.forward(&input, false), false);
 
     let builder = DynSequential::new().with(linear).with(relu);
-    let actual = builder.forward(&input);
+    let actual = builder.forward(&input, false);
     assert_eq!(actual.shape(), expected.shape());
     for index in 0..actual.numel() {
         let index = vec![index / 3, index % 3];
@@ -37,13 +37,13 @@ fn builder_and_vector_constructors_run_the_same_layers() {
     let vector = DynSequential::from_layers(vec![boxed_linear, boxed_relu]);
     assert_eq!(vector.len(), 2);
     assert!(!vector.is_empty());
-    assert_eq!(vector.forward(&input).shape(), &[2, 3]);
+    assert_eq!(vector.forward(&input, false).shape(), &[2, 3]);
 }
 
 #[test]
 fn empty_sequence_is_an_identity_transform() {
     let input = GraphTensor::new(vec![2, 2], 2.5, true);
-    let output = DynSequential::new().forward(&input);
+    let output = DynSequential::new().forward(&input, false);
 
     assert_eq!(output.shape(), input.shape());
     assert!(output.requires_grad());
@@ -94,7 +94,7 @@ fn gradients_and_optimizer_reach_layers_inside_sequence() {
         .with(Linear::new(2, 2, true, StdRng::seed_from_u64(31)))
         .with(ReLU::new());
     let input = GraphTensor::new(vec![1, 2], 1.0, true);
-    let output = sequence.forward(&input);
+    let output = sequence.forward(&input, false);
     let loss = output.sum(&[], false);
     let grads = loss.backward(false);
 

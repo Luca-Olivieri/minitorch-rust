@@ -4,7 +4,7 @@ use crate::core::nn::module::Forward1;
 use crate::core::tensor::AbstractTensor;
 
 pub trait Loss {
-    fn forward(&self, inputs: &GraphTensor, targets: &GraphTensor) -> GraphTensor;
+    fn forward(&self, inputs: &GraphTensor, targets: &GraphTensor, no_grad: bool) -> GraphTensor;
 }
 
 pub struct CrossEntropyLoss {
@@ -26,10 +26,10 @@ impl Default for CrossEntropyLoss {
 }
 
 impl Loss for CrossEntropyLoss {
-    fn forward(&self, logits: &GraphTensor, targets: &GraphTensor) -> GraphTensor {
+    fn forward(&self, logits: &GraphTensor, targets: &GraphTensor, no_grad: bool) -> GraphTensor {
         let ndim = logits.shape().len();
         if ndim == 0 {
-            let logp = self.log_softmax.forward(logits);
+            let logp = self.log_softmax.forward(logits, no_grad);
             let loss = -&(targets * &logp);
             return loss.mean(&[], false);
         }
@@ -37,7 +37,7 @@ impl Loss for CrossEntropyLoss {
         let dim = ndim - 1; // cross-entropy over the last dimension;
 
         // log probabilities computed directly (numerically stable: no ln(0))
-        let log_probs = self.log_softmax.forward(logits);
+        let log_probs = self.log_softmax.forward(logits, no_grad);
 
         // elementwise multiply with targets (expects one-hot targets)
         let mul = targets * &log_probs;

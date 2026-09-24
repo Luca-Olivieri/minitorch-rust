@@ -64,8 +64,9 @@ impl BackwardSource {
     }
 }
 
-/// Build the deferred gradient edge for a differentiable op, or `None` when the
-/// operand dtype does not participate in autograd.
+/// Build the deferred gradient edge for a differentiable op, or `None` when
+/// the operand dtype does not participate in autograd or the computation is
+/// explicitly marked no-grad.
 ///
 /// This is the single gate for "non-differentiable operations produce no graph
 /// edges": `T::DIFFERENTIABLE` is a compile-time constant, so for integer/bool
@@ -74,7 +75,7 @@ pub(crate) fn maybe_edge<T: Dtype, const N: usize>(
     operands: &[&GraphTensor<T>; N],
     op: BackwardOpKind,
 ) -> Option<Box<BackwardSource>> {
-    if T::DIFFERENTIABLE {
+    if T::DIFFERENTIABLE && operands.iter().all(|operand| !operand.is_no_grad()) {
         Some(Box::new(BackwardSource::new(
             operands.iter().map(|o| ErasedHandle::erase(o)).collect(),
             op,

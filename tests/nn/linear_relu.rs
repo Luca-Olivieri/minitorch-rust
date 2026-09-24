@@ -1,11 +1,33 @@
 use minitorch_rust::core::GraphTensor;
 use minitorch_rust::core::nn::activate::ReLU;
 use minitorch_rust::core::nn::compute::Linear;
+use minitorch_rust::core::nn::loss::{CrossEntropyLoss, Loss};
 use minitorch_rust::core::nn::module::Forward1;
 use minitorch_rust::core::tensor::AbstractTensor;
 
 use rand::SeedableRng;
 use rand::rngs::StdRng;
+
+#[test]
+fn no_grad_forward_disables_graph_edges() {
+    let layer = Linear::new(3, 4, true, StdRng::seed_from_u64(42));
+    let input = GraphTensor::new(vec![2, 3], 1.0, true);
+
+    let train_output = layer.forward(&input, false);
+    assert!(train_output.requires_grad());
+
+    let eval_output = layer.forward(&input, true);
+    assert!(!eval_output.requires_grad());
+    assert_eq!(eval_output.shape(), train_output.shape());
+    for index in 0..eval_output.numel() {
+        let coords = vec![index / 4, index % 4];
+        assert_eq!(eval_output.at(&coords), train_output.at(&coords));
+    }
+
+    let targets = GraphTensor::wrap(vec![0.0, 1.0], false);
+    let loss = CrossEntropyLoss::new().forward(&eval_output, &targets.one_hot(4), true);
+    assert!(!loss.requires_grad());
+}
 
 #[test]
 fn linear_relu_forward_and_backward() {
@@ -16,8 +38,8 @@ fn linear_relu_forward_and_backward() {
 
     let x = GraphTensor::new(vec![2, 3], 1.0, true);
 
-    let a = lin.forward(&x);
-    let b = relu.forward(&a);
+    let a = lin.forward(&x, false);
+    let b = relu.forward(&a, false);
 
     let grads_map = b.backward(true);
 

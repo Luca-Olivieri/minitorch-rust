@@ -162,7 +162,8 @@ fn join_path(parent: &str, name: &str) -> String {
 }
 
 pub trait Forward1 {
-    fn forward(&self, input: &GraphTensor) -> GraphTensor;
+    /// Run a forward pass, optionally disabling autograd edge recording.
+    fn forward(&self, input: &GraphTensor, no_grad: bool) -> GraphTensor;
 }
 
 /// A forward-capable module that can be stored in a dynamic container.

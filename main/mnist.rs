@@ -138,9 +138,9 @@ impl SmallCNN {
 
         for step in 0..loader.size() {
             let (inputs, targets) = loader.get_batch(step);
-            let logits = self.forward(&inputs);
+            let logits = self.forward(&inputs, true);
             let targets_oh = targets.one_hot(logits.shape()[1]);
-            let loss = criterion.forward(&logits, &targets_oh);
+            let loss = criterion.forward(&logits, &targets_oh, true);
 
             total_loss += loss.item() * inputs.shape()[0] as f64;
             sample_count += inputs.shape()[0];
@@ -152,9 +152,10 @@ impl SmallCNN {
 }
 
 impl Forward1 for SmallCNN {
-    fn forward(&self, input: &GraphTensor) -> GraphTensor {
-        let features = self.features.forward(input);
-        self.classifier.forward(&features)
+    fn forward(&self, input: &GraphTensor, no_grad: bool) -> GraphTensor {
+        let input = input.with_no_grad(no_grad);
+        let features = self.features.forward(&input, no_grad);
+        self.classifier.forward(&features, no_grad)
     }
 }
 
@@ -231,13 +232,13 @@ fn main() {
             let (inputs, targets) = train_loader.get_batch(step);
 
             let start = Instant::now();
-            let logits = model.forward(&inputs);
+            let logits = model.forward(&inputs, false);
             let forward_time = start.elapsed();
 
             let targets_oh = targets.one_hot(logits.shape()[1]);
 
             let start = Instant::now();
-            let loss = criterion.forward(&logits, &targets_oh);
+            let loss = criterion.forward(&logits, &targets_oh, false);
             let loss_time = start.elapsed();
 
             let start = Instant::now();

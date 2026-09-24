@@ -76,6 +76,7 @@ impl<T: Numeric> GraphTensor<T> {
         let out_node = TensorNode {
             storage: out_store,
             requires_grad: false,
+            no_grad: self.is_no_grad(),
             grad_fn: None,
         };
 
@@ -134,6 +135,7 @@ impl<T: Numeric> GraphTensor<T> {
         let out_node = TensorNode {
             storage: out_store,
             requires_grad,
+            no_grad: a.is_no_grad() || b.is_no_grad(),
             grad_fn,
         };
 
@@ -179,10 +181,16 @@ impl<T: Float> GraphTensor<T> {
     /// all tied maxima are cached in the autograd operation; backward splits the
     /// upstream gradient evenly among them.
     pub fn max_pool2d(&self, kernel: (usize, usize), stride: (usize, usize)) -> GraphTensor<T> {
-        if !self.requires_grad() {
+        if !self.requires_grad() || self.is_no_grad() {
             let storage = TensorStorage::max_pool2d(&self.node.storage, kernel, stride);
+            let out_node = TensorNode {
+                storage,
+                requires_grad: false,
+                no_grad: self.is_no_grad(),
+                grad_fn: None,
+            };
             return GraphTensor {
-                node: Rc::new(TensorNode::from_storage(storage, false)),
+                node: Rc::new(out_node),
             };
         }
 
@@ -198,6 +206,7 @@ impl<T: Float> GraphTensor<T> {
         let out_node = TensorNode {
             storage,
             requires_grad,
+            no_grad: self.is_no_grad(),
             grad_fn,
         };
 
@@ -218,6 +227,7 @@ impl<T: Numeric + OneHotLabel> GraphTensor<T> {
         let out_node = TensorNode {
             storage: out_storage,
             requires_grad: false,
+            no_grad: self.is_no_grad(),
             grad_fn: None,
         };
 

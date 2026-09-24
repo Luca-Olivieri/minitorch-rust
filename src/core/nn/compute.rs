@@ -286,8 +286,9 @@ impl Linear {
 }
 
 impl Forward1 for Linear {
-    fn forward(&self, input: &GraphTensor) -> GraphTensor {
-        let mult = GraphTensor::matmul(input, &self.weight);
+    fn forward(&self, input: &GraphTensor, no_grad: bool) -> GraphTensor {
+        let input = input.with_no_grad(no_grad);
+        let mult = GraphTensor::matmul(&input, &self.weight);
 
         // `b` has shape [out_features], `mult` [batch, out_features]: the `+`
         // broadcasts the bias across the batch dim automatically.
@@ -459,9 +460,10 @@ impl Conv2d {
 }
 
 impl Forward1 for Conv2d {
-    fn forward(&self, input: &GraphTensor) -> GraphTensor {
+    fn forward(&self, input: &GraphTensor, no_grad: bool) -> GraphTensor {
+        let input = input.with_no_grad(no_grad);
         let conv = conv2d_with_options(
-            input,
+            &input,
             &self.weight,
             self.stride,
             self.padding,
@@ -503,8 +505,10 @@ impl AvgPool2d {
 impl Module for AvgPool2d {}
 
 impl Forward1 for AvgPool2d {
-    fn forward(&self, input: &GraphTensor) -> GraphTensor {
-        input.avg_pool2d(self.kernel, self.stride)
+    fn forward(&self, input: &GraphTensor, no_grad: bool) -> GraphTensor {
+        input
+            .with_no_grad(no_grad)
+            .avg_pool2d(self.kernel, self.stride)
     }
 }
 
@@ -530,7 +534,9 @@ impl MaxPool2d {
 impl Module for MaxPool2d {}
 
 impl Forward1 for MaxPool2d {
-    fn forward(&self, input: &GraphTensor) -> GraphTensor {
-        input.max_pool2d(self.kernel, self.stride)
+    fn forward(&self, input: &GraphTensor, no_grad: bool) -> GraphTensor {
+        input
+            .with_no_grad(no_grad)
+            .max_pool2d(self.kernel, self.stride)
     }
 }

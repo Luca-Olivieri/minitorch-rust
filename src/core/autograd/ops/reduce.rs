@@ -120,6 +120,7 @@ impl<T: Float> GradRule<1, T> for AvgPool2dOp {
             let out_node = TensorNode {
                 storage: dx,
                 requires_grad: false,
+                no_grad: false,
                 grad_fn: None,
             };
 
@@ -160,6 +161,7 @@ impl<T: Float> GradRule<1, T> for MaxPool2dOp {
             let out_node = TensorNode {
                 storage: dx,
                 requires_grad: false,
+                no_grad: false,
                 grad_fn: None,
             };
 

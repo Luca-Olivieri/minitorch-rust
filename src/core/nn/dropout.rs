@@ -77,9 +77,10 @@ impl Module for Dropout {
 }
 
 impl Forward1 for Dropout {
-    fn forward(&self, input: &GraphTensor) -> GraphTensor {
+    fn forward(&self, input: &GraphTensor, no_grad: bool) -> GraphTensor {
+        let input = input.with_no_grad(no_grad);
         if !self.training || self.probability == 0.0 {
-            return input.copy_s();
+            return input;
         }
 
         let mask = {
@@ -87,9 +88,9 @@ impl Forward1 for Dropout {
                 .rng
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            self.make_mask(input, &mut rng)
+            self.make_mask(&input, &mut rng)
         };
 
-        input * &mask
+        &input * &mask
     }
 }

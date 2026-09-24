@@ -56,6 +56,7 @@ impl<T: Dtype> GraphTensor<T> {
         let node = TensorNode {
             storage,
             requires_grad: grad_fn.is_some() && self.node.requires_grad,
+            no_grad: self.node.no_grad,
             grad_fn,
         };
         GraphTensor {
@@ -80,6 +81,7 @@ impl<T: Dtype> GraphTensor<T> {
         let node = TensorNode {
             storage,
             requires_grad: grad_fn.is_some() && self.node.requires_grad,
+            no_grad: self.node.no_grad,
             grad_fn,
         };
         GraphTensor {
@@ -103,6 +105,7 @@ impl<T: Dtype> GraphTensor<T> {
         let node = TensorNode {
             storage,
             requires_grad: grad_fn.is_some() && self.node.requires_grad,
+            no_grad: self.node.no_grad,
             grad_fn,
         };
         GraphTensor {
@@ -133,6 +136,7 @@ impl GraphTensor<bool> {
         let node = TensorNode {
             storage,
             requires_grad: false,
+            no_grad: self.node.no_grad,
             grad_fn: None,
         };
         GraphTensor {
@@ -151,6 +155,7 @@ impl<T: Dtype> FreeTensor<T> {
         let node = TensorNode {
             storage,
             requires_grad: self.node.requires_grad,
+            no_grad: self.node.no_grad,
             grad_fn: None,
         };
         FreeTensor {
@@ -166,6 +171,7 @@ impl<T: Dtype> FreeTensor<T> {
         let node = TensorNode {
             storage,
             requires_grad: self.node.requires_grad,
+            no_grad: self.node.no_grad,
             grad_fn: None,
         };
         FreeTensor {
@@ -182,6 +188,7 @@ impl<T: Dtype> FreeTensor<T> {
         let node = TensorNode {
             storage,
             requires_grad: self.node.requires_grad,
+            no_grad: self.node.no_grad,
             grad_fn: None,
         };
         FreeTensor {

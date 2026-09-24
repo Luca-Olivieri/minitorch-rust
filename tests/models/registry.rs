@@ -132,6 +132,6 @@ fn set_requires_grad_before_forward_is_allowed() {
 fn set_requires_grad_after_forward_panics() {
     let mut model = XORClassifier::new(StdRng::seed_from_u64(42));
     let input = GraphTensor::wrap(vec![0.0, 0.0], false);
-    let _logits = model.forward(&input);
+    let _logits = model.forward(&input, false);
     model.set_requires_grad(false, true);
 }

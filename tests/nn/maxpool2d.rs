@@ -111,7 +111,7 @@ fn max_pool2d_is_generic_over_float_dtype() {
 fn maxpool2d_module_defaults_stride_to_kernel() {
     let pool = MaxPool2d::new(2, None);
     let input = GraphTensor::new(vec![1, 1, 4, 4], 2.0, false);
-    let out = pool.forward(&input);
+    let out = pool.forward(&input, false);
 
     assert_eq!(out.shape(), &[1, 1, 2, 2]);
     for row in 0..2 {
@@ -125,7 +125,7 @@ fn maxpool2d_module_defaults_stride_to_kernel() {
 fn maxpool2d_module_accepts_explicit_stride() {
     let pool = MaxPool2d::new(2, Some(1));
     let input = GraphTensor::new(vec![1, 1, 4, 4], 2.0, false);
-    let out = pool.forward(&input);
+    let out = pool.forward(&input, false);
 
     assert_eq!(out.shape(), &[1, 1, 3, 3]);
 }

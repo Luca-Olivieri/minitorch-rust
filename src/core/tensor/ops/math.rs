@@ -100,9 +100,9 @@ pub(crate) fn apply_tensor_op<T: Dtype, F, const N: usize>(
 where
     F: Fn(&[&TensorStorage<T>; N]) -> TensorStorage<T>,
 {
-    // Edge attachment is dtype-gated: `maybe_edge` is compiled away for
-    // non-differentiable dtypes, so those ops are graph boundaries and do not
-    // propagate `requires_grad`.
+    // Edge attachment is dtype- and mode-gated: `maybe_edge` is compiled away
+    // for non-differentiable dtypes and suppressed for no-grad subgraphs.
+    let no_grad = operands.iter().any(|operand| operand.is_no_grad());
     let edge = grad_op.and_then(|op| maybe_edge(operands, op));
     let requires_grad = edge.is_some() && extract_requires_grad(operands);
 
@@ -112,6 +112,7 @@ where
         let out_node = crate::core::node::TensorNode {
             storage: out_store,
             requires_grad,
+            no_grad,
             grad_fn: edge,
         };
 
@@ -134,10 +135,12 @@ where
 {
     with_broadcast_operands(operands, |storages: &[&TensorStorage<T>; N]| {
         let out_store = op(storages);
+        let no_grad = operands.iter().any(|operand| operand.is_no_grad());
 
         let out_node = crate::core::node::TensorNode {
             storage: out_store,
             requires_grad: false,
+            no_grad,
             grad_fn: None,
         };
 

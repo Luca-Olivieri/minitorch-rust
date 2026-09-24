@@ -9,6 +9,7 @@ impl GraphTensor {
         let node = TensorNode {
             storage: TensorStorage::init_xavier_uniform(shape, rng),
             requires_grad,
+            no_grad: false,
             grad_fn: None,
         };
 

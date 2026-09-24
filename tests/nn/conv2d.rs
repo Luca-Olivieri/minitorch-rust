@@ -204,7 +204,7 @@ fn conv2d_module_forward_applies_bias() {
     conv.weight = test_weight();
     conv.bias = Some(GraphTensor::wrap(vec![0.5], true));
 
-    let out = conv.forward(&test_input());
+    let out = conv.forward(&test_input(), false);
     assert_eq!(out.shape(), &[1, 1, 2, 2]);
 
     let expected = [356.5, 392.5, 464.5, 500.5];
@@ -223,7 +223,7 @@ fn conv2d_module_backward_matches_reference_gradients() {
     conv.bias = Some(GraphTensor::wrap(vec![0.5], true));
 
     let input = test_input();
-    let out = conv.forward(&input);
+    let out = conv.forward(&input, false);
     let loss = out.sum(&[], false);
 
     let grads = loss.backward(true);
@@ -264,7 +264,7 @@ fn conv2d_same_padding_preserves_spatial_dimensions() {
         StdRng::seed_from_u64(41),
     );
 
-    let output = conv.forward(&input);
+    let output = conv.forward(&input, false);
     assert_eq!(output.shape(), &[1, 1, 5, 5]);
 }
 
@@ -282,7 +282,7 @@ fn conv2d_supports_stride_and_dilation() {
         StdRng::seed_from_u64(42),
     );
 
-    let output = conv.forward(&input);
+    let output = conv.forward(&input, false);
     assert_eq!(output.shape(), &[1, 1, 4, 4]);
 }
 
@@ -291,7 +291,7 @@ fn conv2d_accepts_numeric_padding_shorthand() {
     let input = GraphTensor::new(vec![1, 1, 5, 5], 1.0, false);
     let conv = Conv2d::new_with_options(1, 1, 3, 2, 1, 1, false, StdRng::seed_from_u64(43));
 
-    let output = conv.forward(&input);
+    let output = conv.forward(&input, false);
     assert_eq!(output.shape(), &[1, 1, 3, 3]);
 }
 
@@ -318,7 +318,7 @@ fn conv2d_dilation_forward_and_backward_match_reference() {
     );
     conv.weight = GraphTensor::wrap(vec![vec![vec![vec![1.0, 2.0], vec![3.0, 4.0]]]], true);
 
-    let output = conv.forward(&input);
+    let output = conv.forward(&input, false);
     assert_eq!(output.shape(), &[1, 1, 2, 2]);
     let expected = [78.0, 88.0, 118.0, 128.0];
     for (flat, value) in expected.iter().enumerate() {

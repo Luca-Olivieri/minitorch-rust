@@ -6,6 +6,7 @@ use crate::core::storage::TensorStorage;
 pub(crate) struct TensorNode<T: Dtype = f64> {
     pub(crate) storage: TensorStorage<T>,
     pub(crate) requires_grad: bool,
+    pub(crate) no_grad: bool,
     // Deferred gradient source, dtype-erased so an edge may connect operands of
     // different float dtypes (differentiable casts, Stage 6c). The rule is
     // materialized (BackwardSource -> NBackwardOp) only when a backward pass
@@ -18,6 +19,7 @@ impl<T: Dtype> TensorNode<T> {
         Self {
             storage: TensorStorage::new(shape, fill_value),
             requires_grad,
+            no_grad: false,
             grad_fn: None,
         }
     }
@@ -26,6 +28,7 @@ impl<T: Dtype> TensorNode<T> {
         Self {
             storage,
             requires_grad,
+            no_grad: false,
             grad_fn: None,
         }
     }

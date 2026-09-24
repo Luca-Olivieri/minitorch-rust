@@ -78,13 +78,13 @@ fn main() {
             let (inputs, targets) = train_dl.get_batch(step);
 
             let start = Instant::now();
-            let logits = model.forward(&inputs);
+            let logits = model.forward(&inputs, false);
             let forward_time = start.elapsed();
 
             let gts_oh = targets.one_hot(logits.shape()[1]);
 
             let start = Instant::now();
-            let loss = criterion.forward(&logits, &gts_oh);
+            let loss = criterion.forward(&logits, &gts_oh, false);
             let loss_time = start.elapsed();
 
             let start = Instant::now();
@@ -154,11 +154,11 @@ impl CovertypeClassifier {
         for step in 0..dl.size() {
             let (inputs, gts) = dl.get_batch(step);
 
-            let prs_oh = self.forward(&inputs);
+            let prs_oh = self.forward(&inputs, true);
 
             let gts_oh = gts.one_hot(prs_oh.shape()[1]);
 
-            let loss = criterion.forward(&prs_oh, &gts_oh);
+            let loss = criterion.forward(&prs_oh, &gts_oh, true);
 
             curr_loss += loss.item() * (inputs.shape()[0] as f64);
             curr_sample_count += inputs.shape()[0];
@@ -170,11 +170,12 @@ impl CovertypeClassifier {
 }
 
 impl Forward1 for CovertypeClassifier {
-    fn forward(&self, input: &GraphTensor) -> GraphTensor {
-        let y1 = self.lin1.forward(input);
-        let y2 = self.relu.forward(&y1);
-        let y3 = self.lin2.forward(&y2);
-        let y4 = self.relu.forward(&y3);
-        self.lin3.forward(&y4) // logits
+    fn forward(&self, input: &GraphTensor, no_grad: bool) -> GraphTensor {
+        let input = input.with_no_grad(no_grad);
+        let y1 = self.lin1.forward(&input, no_grad);
+        let y2 = self.relu.forward(&y1, no_grad);
+        let y3 = self.lin2.forward(&y2, no_grad);
+        let y4 = self.relu.forward(&y3, no_grad);
+        self.lin3.forward(&y4, no_grad) // logits
     }
 }

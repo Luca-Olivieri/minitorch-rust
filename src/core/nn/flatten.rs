@@ -41,7 +41,8 @@ impl Default for Flatten {
 impl Module for Flatten {}
 
 impl Forward1 for Flatten {
-    fn forward(&self, input: &GraphTensor) -> GraphTensor {
+    fn forward(&self, input: &GraphTensor, no_grad: bool) -> GraphTensor {
+        let input = input.with_no_grad(no_grad);
         let ndim = input.shape().len();
         if ndim == 0 {
             panic!("Flatten expects a tensor with at least one dimension.");

@@ -178,6 +178,7 @@ impl<T: Dtype> FreeTensor<T> {
         let node = TensorNode {
             storage: TensorStorage::copy_d(&self.node.storage),
             requires_grad: self.node.requires_grad,
+            no_grad: self.node.no_grad,
             grad_fn: None,
         };
 
@@ -257,12 +258,42 @@ impl<T: Dtype> GraphTensor<T> {
         }
     }
 
+    /// Return a shallow tensor view with gradient recording explicitly disabled.
+    ///
+    /// The flag propagates through tensor operations, so downstream operations
+    /// do not attach backward edges even when another operand is trainable.
+    pub fn with_no_grad(&self, no_grad: bool) -> GraphTensor<T> {
+        if !no_grad {
+            return self.copy_s();
+        }
+
+        if self.node.no_grad {
+            return self.copy_s();
+        }
+
+        let node = TensorNode {
+            storage: TensorStorage::copy_s(&self.node.storage),
+            requires_grad: false,
+            no_grad: true,
+            grad_fn: None,
+        };
+
+        Self {
+            node: Rc::new(node),
+        }
+    }
+
+    pub(crate) fn is_no_grad(&self) -> bool {
+        self.node.no_grad
+    }
+
     /// Detach: share the underlying data buffer but produce a fresh leaf node
     /// with the requested `requires_grad` flag and no graph edge.
     pub fn detach(&self, requires_grad: bool) -> GraphTensor<T> {
         let node = TensorNode {
             storage: TensorStorage::copy_s(&self.node.storage),
             requires_grad,
+            no_grad: self.node.no_grad,
             grad_fn: None,
         };
 
@@ -299,6 +330,7 @@ impl<T: Numeric> GraphTensor<T> {
         let node = TensorNode {
             storage,
             requires_grad,
+            no_grad: self.node.no_grad,
             grad_fn,
         };
 

@@ -77,14 +77,14 @@ impl Module for DynSequential {
 }
 
 impl Forward1 for DynSequential {
-    fn forward(&self, input: &GraphTensor) -> GraphTensor {
+    fn forward(&self, input: &GraphTensor, no_grad: bool) -> GraphTensor {
         let Some(first) = self.layers.first() else {
-            return input.copy_s();
+            return input.with_no_grad(no_grad);
         };
 
-        let mut output = first.forward(input);
+        let mut output = first.forward(input, no_grad);
         for layer in self.layers.iter().skip(1) {
-            output = layer.forward(&output);
+            output = layer.forward(&output, no_grad);
         }
         output
     }
