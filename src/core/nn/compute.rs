@@ -213,3 +213,30 @@ impl Forward1 for AvgPool2d {
         input.avg_pool2d(self.kernel, self.stride)
     }
 }
+
+/// A parameterless 2D max-pooling layer over `[batch, channel, height, width]`
+/// inputs. The window is `kernel x kernel`; `stride` defaults to the kernel
+/// size (no overlap) when not given. See
+/// [`crate::core::GraphTensor::max_pool2d`] for output-size semantics.
+pub struct MaxPool2d {
+    pub kernel: (usize, usize),
+    pub stride: (usize, usize),
+}
+
+impl MaxPool2d {
+    pub fn new(kernel_size: usize, stride: Option<usize>) -> Self {
+        let stride = stride.unwrap_or(kernel_size);
+        Self {
+            kernel: (kernel_size, kernel_size),
+            stride: (stride, stride),
+        }
+    }
+}
+
+impl Module for MaxPool2d {}
+
+impl Forward1 for MaxPool2d {
+    fn forward(&self, input: &GraphTensor) -> GraphTensor {
+        input.max_pool2d(self.kernel, self.stride)
+    }
+}

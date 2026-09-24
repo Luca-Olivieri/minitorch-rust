@@ -129,3 +129,43 @@ impl<T: Float> GradRule<1, T> for AvgPool2dOp {
         }));
     }
 }
+
+#[derive(Debug)]
+pub struct MaxPool2dOp {
+    pub kernel: (usize, usize),
+    pub stride: (usize, usize),
+    pub max_indices: Rc<Vec<Vec<usize>>>,
+}
+
+impl<T: Float> GradRule<1, T> for MaxPool2dOp {
+    fn compute_grad(
+        &self,
+        operands: &[GraphTensor<T>; 1],
+        in_grad: &GraphTensor<T>,
+        _retain_graph: bool,
+        out: &mut Vec<Option<GraphTensor<T>>>,
+    ) {
+        out.push(operands[0].requires_grad().then(|| {
+            let dy_storage = &TensorNodeAccess::get_node(in_grad).storage;
+            let dx = TensorStorage::max_pool2d_backward(
+                dy_storage,
+                operands[0].shape(),
+                self.kernel,
+                self.stride,
+                self.max_indices.as_slice(),
+            );
+
+            // As with average pooling, the scatter is a graph boundary and is
+            // intentionally not differentiable a second time.
+            let out_node = TensorNode {
+                storage: dx,
+                requires_grad: false,
+                grad_fn: None,
+            };
+
+            GraphTensor {
+                node: Rc::new(out_node),
+            }
+        }));
+    }
+}

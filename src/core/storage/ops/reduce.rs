@@ -205,6 +205,176 @@ impl<T: Float> TensorStorage<T> {
         TensorStorage::from_buffer(vec![b, c, out_h, out_w], out_buf)
     }
 
+    /// 2D maximum pooling over a `[batch, channel, height, width]` input.
+    ///
+    /// This is the value-only entry point; it retains the window maxima only long
+    /// enough to build the output. The graph-backed tensor operation uses
+    /// [`Self::max_pool2d_with_indices`] so its backward pass can reuse them.
+    pub fn max_pool2d(
+        a: &TensorStorage<T>,
+        kernel: (usize, usize),
+        stride: (usize, usize),
+    ) -> TensorStorage<T> {
+        Self::max_pool2d_with_indices(a, kernel, stride).0
+    }
+
+    /// 2D maximum pooling plus the logical input indices of every maximum in
+    /// each output window.
+    ///
+    /// Indices are flat indices in the input's logical row-major shape, not
+    /// physical buffer offsets. This lets the cached maxima work for strided
+    /// input views as well as contiguous storage.
+    pub fn max_pool2d_with_indices(
+        a: &TensorStorage<T>,
+        kernel: (usize, usize),
+        stride: (usize, usize),
+    ) -> (TensorStorage<T>, Vec<Vec<usize>>) {
+        if a.shape.len() != 4 {
+            panic!(
+                "max_pool2d expects a [batch, channel, height, width] input, got shape {:?}.",
+                a.shape
+            );
+        }
+
+        let (kh, kw) = kernel;
+        let (sh, sw) = stride;
+        if kh == 0 || kw == 0 || sh == 0 || sw == 0 {
+            panic!(
+                "max_pool2d kernel and stride components must be nonzero, got kernel {kernel:?} stride {stride:?}."
+            );
+        }
+
+        let (b, c) = (a.shape[0], a.shape[1]);
+        let (h, w) = (a.shape[2], a.shape[3]);
+        if kh > h || kw > w {
+            panic!(
+                "max_pool2d kernel {kernel:?} extends past the input height x width ({h} x {w})."
+            );
+        }
+
+        let out_h = (h - kh) / sh + 1;
+        let out_w = (w - kw) / sw + 1;
+        let out_numel = b * c * out_h * out_w;
+        let mut out_buf = Vec::with_capacity(out_numel);
+        let mut all_maxima = Vec::with_capacity(out_numel);
+        let (s0, s1, s2, s3) = (a.strides[0], a.strides[1], a.strides[2], a.strides[3]);
+
+        for batch in 0..b {
+            let b_base = a.offset + batch * s0;
+            for chan in 0..c {
+                let plane = b_base + chan * s1;
+                for oh in 0..out_h {
+                    let h_base = plane + oh * sh * s2;
+                    for ow in 0..out_w {
+                        let w_base = h_base + ow * sw * s3;
+                        let first_index = ((batch * c + chan) * h + oh * sh) * w + ow * sw;
+                        let mut max_value = a.buffer[w_base];
+                        let mut window_maxima = vec![first_index];
+
+                        for i in 0..kh {
+                            let row = w_base + i * s2;
+                            for j in 0..kw {
+                                if i == 0 && j == 0 {
+                                    continue;
+                                }
+
+                                let value = a.buffer[row + j * s3];
+                                if value > max_value {
+                                    max_value = value;
+                                    window_maxima.clear();
+                                    window_maxima.push(
+                                        ((batch * c + chan) * h + oh * sh + i) * w + ow * sw + j,
+                                    );
+                                } else if value == max_value {
+                                    window_maxima.push(
+                                        ((batch * c + chan) * h + oh * sh + i) * w + ow * sw + j,
+                                    );
+                                }
+                            }
+                        }
+
+                        out_buf.push(max_value);
+                        all_maxima.push(window_maxima);
+                    }
+                }
+            }
+        }
+
+        (
+            TensorStorage::from_buffer(vec![b, c, out_h, out_w], out_buf),
+            all_maxima,
+        )
+    }
+
+    /// Gradient of [`Self::max_pool2d`] using the cached maximum positions.
+    ///
+    /// Each output gradient is split evenly among all input positions that
+    /// attained that output window's maximum. Contributions from overlapping
+    /// windows accumulate on a fresh input-shaped buffer.
+    pub fn max_pool2d_backward(
+        dy: &TensorStorage<T>,
+        input_shape: &[usize],
+        kernel: (usize, usize),
+        stride: (usize, usize),
+        max_indices: &[Vec<usize>],
+    ) -> TensorStorage<T> {
+        if input_shape.len() != 4 {
+            panic!(
+                "max_pool2d backward expects a [batch, channel, height, width] input_shape, got {:?}.",
+                input_shape
+            );
+        }
+
+        let (b, c, h, w) = (
+            input_shape[0],
+            input_shape[1],
+            input_shape[2],
+            input_shape[3],
+        );
+        let (kh, kw) = kernel;
+        let (sh, sw) = stride;
+        if kh == 0 || kw == 0 || sh == 0 || sw == 0 || kh > h || kw > w {
+            panic!(
+                "max_pool2d backward has invalid kernel {kernel:?} or stride {stride:?} for input shape {input_shape:?}."
+            );
+        }
+
+        let out_h = (h - kh) / sh + 1;
+        let out_w = (w - kw) / sw + 1;
+        let expected_shape = [b, c, out_h, out_w];
+        if dy.shape.as_slice() != expected_shape {
+            panic!(
+                "max_pool2d backward: the upstream gradient has shape {:?}, expected {:?}.",
+                dy.shape, expected_shape
+            );
+        }
+        if max_indices.len() != dy.numel {
+            panic!(
+                "max_pool2d backward expected one maximum-index group per output element, got {} for {} outputs.",
+                max_indices.len(),
+                dy.numel
+            );
+        }
+
+        let mut out_buf = vec![T::ZERO; input_shape.iter().product()];
+        for (window_maxima, dy_index) in max_indices.iter().zip(dy.strided_indices()) {
+            if window_maxima.is_empty() {
+                panic!("max_pool2d backward encountered an empty maximum-index group.");
+            }
+            let share = dy.buffer[dy_index] * T::from_f64(1.0 / window_maxima.len() as f64);
+            for &input_index in window_maxima {
+                if input_index >= out_buf.len() {
+                    panic!(
+                        "max_pool2d backward encountered out-of-range cached input index {input_index}."
+                    );
+                }
+                out_buf[input_index] += share;
+            }
+        }
+
+        TensorStorage::from_buffer(input_shape.to_vec(), out_buf)
+    }
+
     /// Gradient of [`Self::avg_pool2d`] with respect to its input.
     ///
     /// Each upstream gradient element `dy[b, c, oh, ow]` is scattered into every

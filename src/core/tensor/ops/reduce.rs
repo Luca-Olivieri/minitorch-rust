@@ -171,6 +171,40 @@ impl<T: Float> GraphTensor<T> {
             &[self],
         )
     }
+
+    /// 2D maximum pooling over a `[batch, channel, height, width]` input.
+    ///
+    /// Windows are valid (no padding), and output dimensions use floor mode:
+    /// `(h - kh) / sh + 1` and `(w - kw) / sw + 1`. The logical input indices of
+    /// all tied maxima are cached in the autograd operation; backward splits the
+    /// upstream gradient evenly among them.
+    pub fn max_pool2d(&self, kernel: (usize, usize), stride: (usize, usize)) -> GraphTensor<T> {
+        if !self.requires_grad() {
+            let storage = TensorStorage::max_pool2d(&self.node.storage, kernel, stride);
+            return GraphTensor {
+                node: Rc::new(TensorNode::from_storage(storage, false)),
+            };
+        }
+
+        let (storage, max_indices) =
+            TensorStorage::max_pool2d_with_indices(&self.node.storage, kernel, stride);
+        let grad_op = BackwardOpKind::MaxPool2dOp {
+            kernel,
+            stride,
+            max_indices: Rc::new(max_indices),
+        };
+        let grad_fn = maybe_edge(&[self], grad_op);
+        let requires_grad = grad_fn.is_some() && self.requires_grad();
+        let out_node = TensorNode {
+            storage,
+            requires_grad,
+            grad_fn,
+        };
+
+        GraphTensor {
+            node: Rc::new(out_node),
+        }
+    }
 }
 
 impl<T: Numeric + OneHotLabel> GraphTensor<T> {

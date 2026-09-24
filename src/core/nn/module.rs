@@ -154,3 +154,12 @@ fn join_path(parent: &str, name: &str) -> String {
 pub trait Forward1 {
     fn forward(&self, input: &GraphTensor) -> GraphTensor;
 }
+
+/// A forward-capable module that can be stored in a dynamic container.
+///
+/// This is intentionally separate from [`Module`]: not every module needs a
+/// `forward` implementation, while a heterogeneous sequence must require both
+/// capabilities from each child.
+pub trait Layer: Forward1 + Module {}
+
+impl<T> Layer for T where T: Forward1 + Module {}

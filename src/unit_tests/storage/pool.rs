@@ -215,3 +215,73 @@ fn avg_pool2d_backward_rejects_mismatched_upstream_shape() {
     let dy = TensorStorage::from_buffer(vec![1, 1, 3, 3], vec![0.0; 9]);
     let _ = TensorStorage::avg_pool2d_backward(&dy, &[1, 1, 4, 4], (3, 3), (1, 1));
 }
+
+#[test]
+fn max_pool2d_forward_matches_reference() {
+    let a = TensorStorage::from_buffer(vec![1, 1, 3, 3], (0..9).map(|i| i as f64).collect());
+
+    let (out, maxima) = TensorStorage::max_pool2d_with_indices(&a, (2, 2), (1, 1));
+    assert_eq!(out.shape, vec![1, 1, 2, 2]);
+    assert_eq!(out.buffer.as_slice(), &[4.0, 5.0, 7.0, 8.0]);
+    assert_eq!(maxima, vec![vec![4], vec![5], vec![7], vec![8]]);
+
+    let (rect, _) = TensorStorage::max_pool2d_with_indices(&a, (3, 2), (1, 1));
+    assert_eq!(rect.shape, vec![1, 1, 1, 2]);
+    assert_eq!(rect.buffer.as_slice(), &[7.0, 8.0]);
+}
+
+#[test]
+fn max_pool2d_backward_splits_tied_maxima() {
+    let input = TensorStorage::from_buffer(vec![1, 1, 2, 2], vec![1.0, 4.0, 4.0, 2.0]);
+    let (_, maxima) = TensorStorage::max_pool2d_with_indices(&input, (2, 2), (1, 1));
+    assert_eq!(maxima, vec![vec![1, 2]]);
+
+    let dy = TensorStorage::from_buffer(vec![1, 1, 1, 1], vec![2.0]);
+    let dx = TensorStorage::max_pool2d_backward(&dy, &input.shape, (2, 2), (1, 1), &maxima);
+
+    assert_eq!(dx.buffer.as_slice(), &[0.0, 1.0, 1.0, 0.0]);
+}
+
+#[test]
+fn max_pool2d_forward_handles_strided_views() {
+    let a = TensorStorage::from_buffer(vec![1, 1, 2, 3], vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0]);
+    let t = TensorStorage::transpose(&a, 2, 3);
+    let (out, _) = TensorStorage::max_pool2d_with_indices(&t, (2, 2), (1, 1));
+
+    assert_eq!(out.shape, vec![1, 1, 2, 1]);
+    assert_eq!(out.buffer.as_slice(), &[4.0, 5.0]);
+}
+
+#[test]
+#[should_panic]
+fn max_pool2d_rejects_non_4d_input() {
+    let a = TensorStorage::from_buffer(vec![1, 2, 3], vec![0.0; 6]);
+    let _ = TensorStorage::max_pool2d(&a, (2, 2), (2, 2));
+}
+
+#[test]
+#[should_panic]
+fn max_pool2d_rejects_zero_stride() {
+    let a = TensorStorage::from_buffer(vec![1, 1, 4, 4], vec![0.0; 16]);
+    let _ = TensorStorage::max_pool2d(&a, (2, 2), (0, 2));
+}
+
+#[test]
+#[should_panic]
+fn max_pool2d_rejects_oversized_kernel() {
+    let a = TensorStorage::from_buffer(vec![1, 1, 4, 4], vec![0.0; 16]);
+    let _ = TensorStorage::max_pool2d(&a, (5, 2), (1, 1));
+}
+
+#[test]
+#[should_panic]
+fn max_pool2d_backward_rejects_mismatched_upstream_shape() {
+    let dy = TensorStorage::from_buffer(vec![1, 1, 3, 3], vec![0.0; 9]);
+    let _ = TensorStorage::max_pool2d_backward(
+        &dy,
+        &[1, 1, 4, 4],
+        (3, 3),
+        (1, 1),
+        &vec![Vec::<usize>::new(); 9],
+    );
+}

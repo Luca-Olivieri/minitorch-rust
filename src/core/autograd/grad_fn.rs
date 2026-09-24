@@ -1,10 +1,11 @@
 use std::fmt;
+use std::rc::Rc;
 
 use crate::core::autograd::erased::{ErasedHandle, ErasedTensor, FloatKind, FloatRepr, GradValue};
 use crate::core::autograd::ops::math::{
     AbsOp, AddOp, DivOp, ExpOp, LnOp, MatmulOp, MaximumOp, MulOp, NegOp, PowOp, SqrtOp, SubOp,
 };
-use crate::core::autograd::ops::reduce::{AvgPool2dOp, MaxOp, SumOp};
+use crate::core::autograd::ops::reduce::{AvgPool2dOp, MaxOp, MaxPool2dOp, SumOp};
 use crate::core::autograd::ops::shape::{
     BroadcastOp, CopyDOp, ExpandOp, PadOp, ReshapeOp, SliceOp, SqueezeOp, TransposeOp, UnsqueezeOp,
 };
@@ -115,6 +116,14 @@ pub(crate) enum BackwardOpKind {
         kernel: (usize, usize),
         stride: (usize, usize),
     },
+    /// 2D maximum pooling. The cached groups contain logical input indices for
+    /// every maximum in each output window, so tied maxima can share the
+    /// upstream gradient without rescanning the input.
+    MaxPool2dOp {
+        kernel: (usize, usize),
+        stride: (usize, usize),
+        max_indices: Rc<Vec<Vec<usize>>>,
+    },
     CopyDOp,
     UnsqueezeOp {
         dim: usize,
@@ -208,6 +217,18 @@ fn box_grad_rule<T: Float>(
         BackwardOpKind::AvgPool2dOp { kernel, stride } => {
             box_rule::<AvgPool2dOp, 1, T>(operands, AvgPool2dOp { kernel, stride })
         }
+        BackwardOpKind::MaxPool2dOp {
+            kernel,
+            stride,
+            max_indices,
+        } => box_rule::<MaxPool2dOp, 1, T>(
+            operands,
+            MaxPool2dOp {
+                kernel,
+                stride,
+                max_indices,
+            },
+        ),
         BackwardOpKind::CopyDOp => box_rule::<CopyDOp, 1, T>(operands, CopyDOp {}),
         BackwardOpKind::UnsqueezeOp { dim } => {
             box_rule::<UnsqueezeOp, 1, T>(operands, UnsqueezeOp { dim })
