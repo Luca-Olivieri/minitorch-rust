@@ -3,6 +3,7 @@ mod utils;
 mod macros;
 
 pub mod compare;
+pub mod conv;
 pub mod logic;
 pub mod math;
 pub mod reduce;

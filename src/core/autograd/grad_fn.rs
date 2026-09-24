@@ -2,6 +2,7 @@ use std::fmt;
 use std::rc::Rc;
 
 use crate::core::autograd::erased::{ErasedHandle, ErasedTensor, FloatKind, FloatRepr, GradValue};
+use crate::core::autograd::ops::conv::Conv2dOp;
 use crate::core::autograd::ops::math::{
     AbsOp, AddOp, DivOp, ExpOp, LnOp, MatmulOp, MaximumOp, MulOp, NegOp, PowOp, SqrtOp, SubOp,
 };
@@ -103,6 +104,11 @@ pub(crate) enum BackwardOpKind {
     SqrtOp,
     PowOp,
     MatmulOp,
+    Conv2dOp {
+        stride: (usize, usize),
+        padding: ((usize, usize), (usize, usize)),
+        dilation: (usize, usize),
+    },
     MaximumOp,
     SumOp {
         dims: Vec<usize>,
@@ -210,6 +216,18 @@ fn box_grad_rule<T: Float>(
         BackwardOpKind::DivOp => box_rule::<DivOp, 2, T>(operands, DivOp),
         BackwardOpKind::MaximumOp => box_rule::<MaximumOp, 2, T>(operands, MaximumOp),
         BackwardOpKind::MatmulOp => box_rule::<MatmulOp, 2, T>(operands, MatmulOp {}),
+        BackwardOpKind::Conv2dOp {
+            stride,
+            padding,
+            dilation,
+        } => box_rule::<Conv2dOp, 2, T>(
+            operands,
+            Conv2dOp {
+                stride,
+                padding,
+                dilation,
+            },
+        ),
         BackwardOpKind::PowOp => box_rule::<PowOp, 2, T>(operands, PowOp),
         BackwardOpKind::NegOp => box_rule::<NegOp, 1, T>(operands, NegOp),
         BackwardOpKind::AbsOp => box_rule::<AbsOp, 1, T>(operands, AbsOp),

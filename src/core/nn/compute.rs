@@ -1,8 +1,13 @@
+use std::rc::Rc;
+
 use rand::rngs::StdRng;
 
 use crate::core::GraphTensor;
+use crate::core::autograd::grad_fn::{BackwardOpKind, maybe_edge};
 use crate::core::dtype::Numeric;
 use crate::core::nn::module::{Forward1, Module};
+use crate::core::node::{AutogradMeta, TensorNode};
+use crate::core::storage::ops::conv::conv2d as conv2d_storage;
 use crate::core::tensor::AbstractTensor;
 use crate::module;
 
@@ -135,16 +140,16 @@ fn resolve_padding(
 ///
 /// `input` is `[batch, in_channel, height, width]`; `weight` is
 /// `[in_channel, out_channel, kernel_h, kernel_w]`. Groups are intentionally
-/// fixed at one. The kernel is decomposed into `kernel_h * kernel_w` taps;
-/// each tap correlates a strided spatial window with the corresponding weight
-/// slice via a 2D `matmul` over the channel axis. Gradients flow through the
-/// padding, strided slices, and matrix multiplication nodes.
+/// fixed at one. The direct kernel handles padding without materializing a
+/// padded input and records one convolution backward operation.
 pub fn conv2d<T: Numeric>(input: &GraphTensor<T>, weight: &GraphTensor<T>) -> GraphTensor<T> {
     conv2d_with_options(input, weight, Size2::ONE, Conv2dPadding::Valid, Size2::ONE)
 }
 
 /// Batched 2D cross-correlation with configurable stride, padding, and
 /// dilation. Only zero padding is currently supported by [`Conv2dPadding`].
+/// The forward path uses one direct storage kernel rather than composing
+/// slices, reshapes, transposes, and matrix multiplications.
 pub fn conv2d_with_options<T: Numeric>(
     input: &GraphTensor<T>,
     weight: &GraphTensor<T>,
@@ -176,12 +181,10 @@ pub fn conv2d_with_options_with_mode<T: Numeric>(
         );
     }
 
-    let batch = input.shape()[0];
     let in_ch = input.shape()[1];
     let height = input.shape()[2];
     let width = input.shape()[3];
 
-    let out_ch = weight.shape()[1];
     let kernel = Size2 {
         height: weight.shape()[2],
         width: weight.shape()[3],
@@ -214,62 +217,31 @@ pub fn conv2d_with_options_with_mode<T: Numeric>(
         panic!("conv2d produced an empty spatial output.");
     }
 
-    let pads = [(0, 0), (0, 0), (pad_top, pad_bottom), (pad_left, pad_right)];
-    let padded_input = if pads
-        .iter()
-        .all(|(before, after)| *before == 0 && *after == 0)
-    {
-        input.copy_s()
-    } else {
-        input.pad_with_mode(&pads, no_grad)
-    };
+    let padding = ((pad_top, pad_bottom), (pad_left, pad_right));
+    let output_storage = conv2d_storage(
+        &input.node.storage,
+        &weight.node.storage,
+        (stride.height, stride.width),
+        padding,
+        (dilation.height, dilation.width),
+    );
+    let autograd = maybe_edge(
+        &[input, weight],
+        BackwardOpKind::Conv2dOp {
+            stride: (stride.height, stride.width),
+            padding,
+            dilation: (dilation.height, dilation.width),
+        },
+        no_grad,
+    )
+    .map(AutogradMeta::Node);
 
-    let mut acc: Option<GraphTensor<T>> = None;
-    for i in 0..kernel.height {
-        for j in 0..kernel.width {
-            // Window [B, in_ch, out_h, out_w] for this tap, sampled at the
-            // configured stride and dilation.
-            let window = padded_input.slice_strided_with_mode(
-                &[
-                    (0, batch, 1),
-                    (0, in_ch, 1),
-                    (i * dilation.height, out_h, stride.height),
-                    (j * dilation.width, out_w, stride.width),
-                ],
-                no_grad,
-            );
-
-            // Weight slice [in_ch, out_ch] for this tap: [in_ch, out_ch, 1, 1]
-            // with the singleton kernel axes squeezed away.
-            let kernel_slice = weight
-                .slice_with_mode(&[(0, in_ch), (0, out_ch), (i, 1), (j, 1)], no_grad)
-                .squeeze_with_mode(2, no_grad)
-                .squeeze_with_mode(2, no_grad);
-
-            // [B, in_ch, out_h, out_w] -> [B, out_h, out_w, in_ch] (two
-            // transposes build any 4D permutation), flattened to the 2D
-            // [B*out_h*out_w, in_ch] matrix the matmul kernel needs.
-            let flat = window
-                .transpose_with_mode(1, 2, no_grad)
-                .transpose_with_mode(2, 3, no_grad)
-                .reshape_with_mode(&[batch * out_h * out_w, in_ch], no_grad);
-
-            let result = GraphTensor::matmul_with_mode(&flat, &kernel_slice, no_grad);
-
-            // Back to [B, out_h, out_w, out_ch], then [B, out_ch, out_h, out_w].
-            let tap = result
-                .reshape_with_mode(&[batch, out_h, out_w, out_ch], no_grad)
-                .transpose_with_mode(2, 3, no_grad)
-                .transpose_with_mode(1, 2, no_grad);
-
-            acc = match acc {
-                None => Some(tap),
-                Some(prev) => Some(prev.add_with_mode(&tap, no_grad)),
-            };
-        }
+    GraphTensor {
+        node: Rc::new(TensorNode {
+            storage: output_storage,
+            autograd,
+        }),
     }
-
-    acc.expect("conv2d over a non-empty kernel always yields a result")
 }
 
 module! {

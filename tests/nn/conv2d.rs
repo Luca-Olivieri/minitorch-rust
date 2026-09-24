@@ -341,6 +341,47 @@ fn conv2d_dilation_forward_and_backward_match_reference() {
 }
 
 #[test]
+fn conv2d_direct_backward_handles_same_padding() {
+    let input = GraphTensor::wrap(
+        vec![vec![vec![
+            vec![1.0, 2.0, 3.0],
+            vec![4.0, 5.0, 6.0],
+            vec![7.0, 8.0, 9.0],
+        ]]],
+        true,
+    );
+    let mut conv = Conv2d::new_with_options(
+        1,
+        1,
+        2,
+        1,
+        Conv2dPadding::Same,
+        1,
+        false,
+        StdRng::seed_from_u64(45),
+    );
+    conv.weight = GraphTensor::wrap(vec![vec![vec![vec![1.0, 2.0], vec![3.0, 4.0]]]], true);
+
+    let output = conv.forward(&input, false);
+    assert_eq!(output.shape(), &[1, 1, 3, 3]);
+    let grads = output.sum(&[], false).backward(true);
+
+    let dx = grads.get(&input).unwrap();
+    let expected_dx = [1.0, 3.0, 3.0, 4.0, 10.0, 10.0, 4.0, 10.0, 10.0];
+    for (flat, value) in expected_dx.iter().enumerate() {
+        let index = unflatten(dx.shape(), flat);
+        approx(*dx.at(&index), *value);
+    }
+
+    let dw = grads.get(&conv.weight).unwrap();
+    let expected_dw = [45.0, 33.0, 39.0, 28.0];
+    for (flat, value) in expected_dw.iter().enumerate() {
+        let index = unflatten(dw.shape(), flat);
+        approx(*dw.at(&index), *value);
+    }
+}
+
+#[test]
 #[should_panic]
 fn conv2d_channel_mismatch_panics() {
     let input = GraphTensor::new(vec![1, 3, 4, 4], 1.0, false);
