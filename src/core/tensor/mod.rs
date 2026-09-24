@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use crate::core::autograd::grad_fn::{BackwardOpKind, maybe_edge};
 use crate::core::dtype::{Dtype, DtypeStyler, Numeric};
-use crate::core::node::TensorNode;
+use crate::core::node::{AutogradMeta, TensorNode};
 use crate::core::storage::TensorStorage;
 
 /// Accessors shared by every tensor flavor (`GraphTensor`, `FreeTensor`).
@@ -143,7 +143,7 @@ impl<T: Dtype> AbstractTensor<T> for FreeTensor<T> {
     }
 
     fn requires_grad(&self) -> bool {
-        self.node.requires_grad
+        self.node.requires_grad()
     }
 }
 
@@ -169,7 +169,7 @@ impl<T: Dtype> FreeTensor<T> {
     /// Set the autograd flag in place. Only safe on the owned, uniquely held
     /// `FreeTensor`; `GraphTensor` nodes are immutable once shared in a graph.
     pub fn set_requires_grad(&mut self, requires_grad: bool) {
-        self.node.requires_grad = requires_grad;
+        self.node.autograd = requires_grad.then_some(AutogradMeta::Leaf);
     }
 
     /// New tensor backed by a deep copy of the data buffer. Free tensors stay
@@ -177,9 +177,7 @@ impl<T: Dtype> FreeTensor<T> {
     pub fn copy_d(&self) -> Self {
         let node = TensorNode {
             storage: TensorStorage::copy_d(&self.node.storage),
-            requires_grad: self.node.requires_grad,
-            no_grad: self.node.no_grad,
-            grad_fn: None,
+            autograd: self.node.requires_grad().then_some(AutogradMeta::Leaf),
         };
 
         Self {
@@ -258,43 +256,12 @@ impl<T: Dtype> GraphTensor<T> {
         }
     }
 
-    /// Return a shallow tensor view with gradient recording explicitly disabled.
-    ///
-    /// The flag propagates through tensor operations, so downstream operations
-    /// do not attach backward edges even when another operand is trainable.
-    pub fn with_no_grad(&self, no_grad: bool) -> GraphTensor<T> {
-        if !no_grad {
-            return self.copy_s();
-        }
-
-        if self.node.no_grad {
-            return self.copy_s();
-        }
-
-        let node = TensorNode {
-            storage: TensorStorage::copy_s(&self.node.storage),
-            requires_grad: false,
-            no_grad: true,
-            grad_fn: None,
-        };
-
-        Self {
-            node: Rc::new(node),
-        }
-    }
-
-    pub(crate) fn is_no_grad(&self) -> bool {
-        self.node.no_grad
-    }
-
     /// Detach: share the underlying data buffer but produce a fresh leaf node
     /// with the requested `requires_grad` flag and no graph edge.
     pub fn detach(&self, requires_grad: bool) -> GraphTensor<T> {
         let node = TensorNode {
             storage: TensorStorage::copy_s(&self.node.storage),
-            requires_grad,
-            no_grad: self.node.no_grad,
-            grad_fn: None,
+            autograd: requires_grad.then_some(AutogradMeta::Leaf),
         };
 
         Self {
@@ -323,16 +290,15 @@ impl<T: Numeric> GraphTensor<T> {
     /// (linear) operation: its gradient is the incoming gradient passed
     /// through unchanged.
     pub fn copy_d(&self) -> GraphTensor<T> {
-        let storage = TensorStorage::copy_d(&self.node.storage);
-        let grad_fn = maybe_edge(&[self], BackwardOpKind::CopyDOp);
-        let requires_grad = grad_fn.is_some() && self.node.requires_grad;
+        self.copy_d_with_mode(false)
+    }
 
-        let node = TensorNode {
-            storage,
-            requires_grad,
-            no_grad: self.node.no_grad,
-            grad_fn,
-        };
+    pub fn copy_d_with_mode(&self, no_grad: bool) -> GraphTensor<T> {
+        let storage = TensorStorage::copy_d(&self.node.storage);
+        let autograd =
+            maybe_edge(&[self], BackwardOpKind::CopyDOp, no_grad).map(AutogradMeta::Node);
+
+        let node = TensorNode { storage, autograd };
 
         Self {
             node: Rc::new(node),
@@ -395,7 +361,7 @@ impl<T: Dtype> AbstractTensor<T> for GraphTensor<T> {
     }
 
     fn requires_grad(&self) -> bool {
-        self.node.requires_grad
+        self.node.requires_grad()
     }
 }
 
@@ -420,8 +386,4 @@ impl<T: DtypeStyler> fmt::Debug for GraphTensor<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(self, f)
     }
-}
-
-pub(crate) fn extract_requires_grad<T: Dtype>(operands: &[&GraphTensor<T>]) -> bool {
-    operands.iter().any(|t| t.get_node().requires_grad)
 }

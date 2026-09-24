@@ -76,8 +76,8 @@ impl ErasedTensor {
     /// A node without an edge is a leaf for the output-map filter.
     pub(crate) fn is_leaf(&self) -> bool {
         match self {
-            ErasedTensor::F32(g) => g.node.grad_fn.is_none(),
-            ErasedTensor::F64(g) => g.node.grad_fn.is_none(),
+            ErasedTensor::F32(g) => g.node.grad_fn().is_none(),
+            ErasedTensor::F64(g) => g.node.grad_fn().is_none(),
         }
     }
 
@@ -107,8 +107,8 @@ impl ErasedTensor {
     /// The node's edge operands, erased; empty for a leaf.
     pub(crate) fn erased_operands(&self) -> Vec<ErasedTensor> {
         let source = match self {
-            ErasedTensor::F32(g) => g.node.grad_fn.as_ref(),
-            ErasedTensor::F64(g) => g.node.grad_fn.as_ref(),
+            ErasedTensor::F32(g) => g.node.grad_fn(),
+            ErasedTensor::F64(g) => g.node.grad_fn(),
         };
         source
             .map(|src| {

@@ -19,10 +19,9 @@ impl Default for ReLU {
 
 impl Forward1 for ReLU {
     fn forward(&self, input: &GraphTensor, no_grad: bool) -> GraphTensor {
-        let input = input.with_no_grad(no_grad);
         // the scalar broadcasts to the input shape, so no full-size zeros tensor is allocated
         let zero = GraphTensor::new(vec![], 0.0, false);
-        GraphTensor::maximum(&input, &zero)
+        input.maximum_with_mode(&zero, no_grad)
     }
 }
 
@@ -44,18 +43,20 @@ impl LogSoftmax {
 
 impl Forward1 for LogSoftmax {
     fn forward(&self, input: &GraphTensor, no_grad: bool) -> GraphTensor {
-        let input = input.with_no_grad(no_grad);
         // log_softmax(x)_i = x_i - max(x) - ln(sum(exp(x - max(x)))) over the last dim.
         // Computing ln(softmax) directly avoids ln(0) -> -inf and the 0 * -inf = NaN
         // that would result from a separate `softmax(x).ln()` pipeline.
         let dim = input.shape().len() - 1; // softmax over the last dimension
 
         // keepdim: shapes stay broadcastable (…,1) so no manual unsqueeze/expand
-        let maxes = input.max(&[dim], true);
-        let shifted = &input - &maxes;
+        let maxes = input.max_with_mode(&[dim], true, no_grad);
+        let shifted = input.sub_with_mode(&maxes, no_grad);
 
-        let log_denom = shifted.exp().sum(&[dim], true).ln();
-        &shifted - &log_denom
+        let log_denom = shifted
+            .exp_with_mode(no_grad)
+            .sum_with_mode(&[dim], true, no_grad)
+            .ln_with_mode(no_grad);
+        shifted.sub_with_mode(&log_denom, no_grad)
     }
 }
 
@@ -77,7 +78,6 @@ impl Softmax {
 
 impl Forward1 for Softmax {
     fn forward(&self, input: &GraphTensor, no_grad: bool) -> GraphTensor {
-        let input = input.with_no_grad(no_grad);
         let ndim = input.shape().len();
         if ndim == 0 {
             return GraphTensor::new(input.shape().clone(), 1.0, false);
@@ -86,15 +86,15 @@ impl Forward1 for Softmax {
         let dim = ndim - 1; // softmax over the last dimension
 
         // subtract the max over the class dim for numerical stability
-        let maxes = input.max(&[dim], true);
-        let shifted = &input - &maxes;
+        let maxes = input.max_with_mode(&[dim], true, no_grad);
+        let shifted = input.sub_with_mode(&maxes, no_grad);
 
         // compute exponentials of the shifted values
-        let exps = shifted.exp();
+        let exps = shifted.exp_with_mode(no_grad);
 
         // sum over the target dimension (kept as size-1 for broadcasting)
-        let sums = exps.sum(&[dim], true);
+        let sums = exps.sum_with_mode(&[dim], true, no_grad);
 
-        &exps / &sums
+        exps.div_with_mode(&sums, no_grad)
     }
 }

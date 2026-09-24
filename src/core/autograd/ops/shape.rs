@@ -213,9 +213,7 @@ impl<T: Numeric> GradRule<1, T> for StridedSliceOp {
             // materialized directly rather than through a higher-order unslice.
             let out_node = TensorNode {
                 storage: dx,
-                requires_grad: false,
-                no_grad: false,
-                grad_fn: None,
+                autograd: None,
             };
 
             GraphTensor {

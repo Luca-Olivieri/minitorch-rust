@@ -153,8 +153,7 @@ impl SmallCNN {
 
 impl Forward1 for SmallCNN {
     fn forward(&self, input: &GraphTensor, no_grad: bool) -> GraphTensor {
-        let input = input.with_no_grad(no_grad);
-        let features = self.features.forward(&input, no_grad);
+        let features = self.features.forward(input, no_grad);
         self.classifier.forward(&features, no_grad)
     }
 }

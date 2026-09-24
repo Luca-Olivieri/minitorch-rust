@@ -33,8 +33,7 @@ impl XORClassifier {
 
 impl Forward1 for XORClassifier {
     fn forward(&self, input: &GraphTensor, no_grad: bool) -> GraphTensor {
-        let input = input.with_no_grad(no_grad);
-        let y1 = self.lin1.forward(&input, no_grad);
+        let y1 = self.lin1.forward(input, no_grad);
         let y2 = self.relu.forward(&y1, no_grad);
         let y3 = self.lin2.forward(&y2, no_grad);
         let y4 = self.relu.forward(&y3, no_grad);

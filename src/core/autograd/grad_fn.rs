@@ -74,8 +74,9 @@ impl BackwardSource {
 pub(crate) fn maybe_edge<T: Dtype, const N: usize>(
     operands: &[&GraphTensor<T>; N],
     op: BackwardOpKind,
+    no_grad: bool,
 ) -> Option<Box<BackwardSource>> {
-    if T::DIFFERENTIABLE && operands.iter().all(|operand| !operand.is_no_grad()) {
+    if !no_grad && T::DIFFERENTIABLE && operands.iter().any(|operand| operand.requires_grad()) {
         Some(Box::new(BackwardSource::new(
             operands.iter().map(|o| ErasedHandle::erase(o)).collect(),
             op,
@@ -376,18 +377,18 @@ pub(crate) fn materialize_grad_fn(node: &ErasedTensor) -> Option<Box<dyn ErasedG
     let dst = node.kind();
     match node {
         ErasedTensor::F32(g) => {
-            let source = g.node.grad_fn.as_ref()?;
+            let source = g.node.grad_fn()?;
             if matches!(&source.op, BackwardOpKind::CastOp) {
                 return Some(cast_grad_fn(source, dst));
             }
-            Some(make::<f32>((**source).clone()))
+            Some(make::<f32>(source.clone()))
         }
         ErasedTensor::F64(g) => {
-            let source = g.node.grad_fn.as_ref()?;
+            let source = g.node.grad_fn()?;
             if matches!(&source.op, BackwardOpKind::CastOp) {
                 return Some(cast_grad_fn(source, dst));
             }
-            Some(make::<f64>((**source).clone()))
+            Some(make::<f64>(source.clone()))
         }
     }
 }
@@ -470,7 +471,7 @@ impl<Op: GradRule<N, T>, const N: usize, T: Dtype> ComputesGrads<T> for NBackwar
 
         if !retain_graph {
             for g in out.iter_mut().flatten() {
-                g.get_node_mut().grad_fn = None;
+                g.get_node_mut().autograd = None;
             }
         }
     }

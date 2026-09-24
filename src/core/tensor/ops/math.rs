@@ -2,9 +2,9 @@ use std::ops::{Add, Div, Mul, Neg, Sub};
 
 use crate::core::autograd::grad_fn::{BackwardOpKind, maybe_edge};
 use crate::core::dtype::{Dtype, Float, Numeric, Signed};
+use crate::core::node::AutogradMeta;
 use crate::core::storage::TensorStorage;
 use crate::core::tensor::GraphTensor;
-use crate::core::tensor::extract_requires_grad;
 
 // Math ops live in dtype homes, chosen by what their *forward* kernels need.
 // Forward edges only record a `BackwardSource`, so no op needs a `GradRule`
@@ -31,6 +31,7 @@ impl<T: Numeric> GraphTensor<T> {
         apply_tensor_op(
             |ops: &[&TensorStorage<T>; 2]| TensorStorage::modul(&[ops[0], ops[1]]),
             None,
+            false,
             &[self, other],
         )
     }
@@ -41,6 +42,7 @@ impl<T: Numeric> GraphTensor<T> {
         apply_tensor_op(
             |ops: &[&TensorStorage<T>; 2]| TensorStorage::sub_scaled(ops[0], ops[1], scale),
             None,
+            false,
             &[self, other],
         )
     }
@@ -51,9 +53,14 @@ impl<T: Signed> GraphTensor<T> {
     /// zero); a graph boundary for signed integers (`T::DIFFERENTIABLE` is
     /// false, so no edge is recorded and `requires_grad` does not propagate).
     pub fn abs(&self) -> GraphTensor<T> {
+        self.abs_with_mode(false)
+    }
+
+    pub fn abs_with_mode(&self, no_grad: bool) -> GraphTensor<T> {
         apply_tensor_op(
             |ops: &[&TensorStorage<T>; 1]| TensorStorage::abs(&[ops[0]]),
             Some(BackwardOpKind::AbsOp),
+            no_grad,
             &[self],
         )
     }
@@ -77,43 +84,143 @@ impl_tensor_scalar_ops! {
     Numeric, Div, div;
 }
 
+impl<T: Numeric> GraphTensor<T> {
+    pub fn maximum_with_mode(&self, other: &GraphTensor<T>, no_grad: bool) -> GraphTensor<T> {
+        apply_tensor_op(
+            |ops: &[&TensorStorage<T>; 2]| TensorStorage::maximum(&[ops[0], ops[1]]),
+            Some(BackwardOpKind::MaximumOp),
+            no_grad,
+            &[self, other],
+        )
+    }
+
+    pub fn add_with_mode(&self, other: &GraphTensor<T>, no_grad: bool) -> GraphTensor<T> {
+        apply_tensor_op(
+            |ops: &[&TensorStorage<T>; 2]| TensorStorage::add(&[ops[0], ops[1]]),
+            Some(BackwardOpKind::AddOp),
+            no_grad,
+            &[self, other],
+        )
+    }
+
+    pub fn mul_with_mode(&self, other: &GraphTensor<T>, no_grad: bool) -> GraphTensor<T> {
+        apply_tensor_op(
+            |ops: &[&TensorStorage<T>; 2]| TensorStorage::mul(&[ops[0], ops[1]]),
+            Some(BackwardOpKind::MulOp),
+            no_grad,
+            &[self, other],
+        )
+    }
+
+    pub fn sub_with_mode(&self, other: &GraphTensor<T>, no_grad: bool) -> GraphTensor<T> {
+        apply_tensor_op(
+            |ops: &[&TensorStorage<T>; 2]| TensorStorage::sub(&[ops[0], ops[1]]),
+            Some(BackwardOpKind::SubOp),
+            no_grad,
+            &[self, other],
+        )
+    }
+
+    pub fn div_with_mode(&self, other: &GraphTensor<T>, no_grad: bool) -> GraphTensor<T> {
+        apply_tensor_op(
+            |ops: &[&TensorStorage<T>; 2]| TensorStorage::div(&[ops[0], ops[1]]),
+            Some(BackwardOpKind::DivOp),
+            no_grad,
+            &[self, other],
+        )
+    }
+}
+
+impl<T: Signed> GraphTensor<T> {
+    pub fn neg_with_mode(&self, no_grad: bool) -> GraphTensor<T> {
+        apply_tensor_op(
+            |ops: &[&TensorStorage<T>; 1]| TensorStorage::neg(&[ops[0]]),
+            Some(BackwardOpKind::NegOp),
+            no_grad,
+            &[self],
+        )
+    }
+}
+
 impl<T: Float> GraphTensor<T> {
     impl_tensor_unary_method!(ln, TensorStorage::ln, LnOp);
     impl_tensor_unary_method!(exp, TensorStorage::exp, ExpOp);
     impl_tensor_unary_method!(sqrt, TensorStorage::sqrt, SqrtOp);
     impl_tensor_binary_method!(pow, TensorStorage::pow, PowOp);
 
+    pub fn ln_with_mode(&self, no_grad: bool) -> GraphTensor<T> {
+        apply_tensor_op(
+            |ops: &[&TensorStorage<T>; 1]| TensorStorage::ln(&[ops[0]]),
+            Some(BackwardOpKind::LnOp),
+            no_grad,
+            &[self],
+        )
+    }
+
+    pub fn exp_with_mode(&self, no_grad: bool) -> GraphTensor<T> {
+        apply_tensor_op(
+            |ops: &[&TensorStorage<T>; 1]| TensorStorage::exp(&[ops[0]]),
+            Some(BackwardOpKind::ExpOp),
+            no_grad,
+            &[self],
+        )
+    }
+
+    pub fn sqrt_with_mode(&self, no_grad: bool) -> GraphTensor<T> {
+        apply_tensor_op(
+            |ops: &[&TensorStorage<T>; 1]| TensorStorage::sqrt(&[ops[0]]),
+            Some(BackwardOpKind::SqrtOp),
+            no_grad,
+            &[self],
+        )
+    }
+
+    pub fn pow_with_mode(&self, other: &GraphTensor<T>, no_grad: bool) -> GraphTensor<T> {
+        apply_tensor_op(
+            |ops: &[&TensorStorage<T>; 2]| TensorStorage::pow(&[ops[0], ops[1]]),
+            Some(BackwardOpKind::PowOp),
+            no_grad,
+            &[self, other],
+        )
+    }
+
     pub fn norm(&self) -> GraphTensor<T> {
-        (self * self).sum(&[], false).sqrt()
+        self.norm_with_mode(false)
+    }
+
+    pub fn norm_with_mode(&self, no_grad: bool) -> GraphTensor<T> {
+        self.mul_with_mode(self, no_grad)
+            .sum_with_mode(&[], false, no_grad)
+            .sqrt_with_mode(no_grad)
     }
 
     pub fn dist(a: &GraphTensor<T>, b: &GraphTensor<T>) -> GraphTensor<T> {
-        (a - b).norm()
+        Self::dist_with_mode(a, b, false)
+    }
+
+    pub fn dist_with_mode(a: &GraphTensor<T>, b: &GraphTensor<T>, no_grad: bool) -> GraphTensor<T> {
+        a.sub_with_mode(b, no_grad).norm_with_mode(no_grad)
     }
 }
 
 pub(crate) fn apply_tensor_op<T: Dtype, F, const N: usize>(
     op: F,
     grad_op: Option<BackwardOpKind>,
+    no_grad: bool,
     operands: &[&GraphTensor<T>; N],
 ) -> GraphTensor<T>
 where
     F: Fn(&[&TensorStorage<T>; N]) -> TensorStorage<T>,
 {
-    // Edge attachment is dtype- and mode-gated: `maybe_edge` is compiled away
-    // for non-differentiable dtypes and suppressed for no-grad subgraphs.
-    let no_grad = operands.iter().any(|operand| operand.is_no_grad());
-    let edge = grad_op.and_then(|op| maybe_edge(operands, op));
-    let requires_grad = edge.is_some() && extract_requires_grad(operands);
+    let autograd = grad_op
+        .and_then(|op| maybe_edge(operands, op, no_grad))
+        .map(AutogradMeta::Node);
 
     with_broadcast_operands(operands, |storages: &[&TensorStorage<T>; N]| {
         let out_store = op(storages);
-
         let out_node = crate::core::node::TensorNode {
             storage: out_store,
-            requires_grad,
-            no_grad,
-            grad_fn: edge,
+            autograd,
         };
 
         GraphTensor {
@@ -135,13 +242,9 @@ where
 {
     with_broadcast_operands(operands, |storages: &[&TensorStorage<T>; N]| {
         let out_store = op(storages);
-        let no_grad = operands.iter().any(|operand| operand.is_no_grad());
-
         let out_node = crate::core::node::TensorNode {
             storage: out_store,
-            requires_grad: false,
-            no_grad,
-            grad_fn: None,
+            autograd: None,
         };
 
         GraphTensor {

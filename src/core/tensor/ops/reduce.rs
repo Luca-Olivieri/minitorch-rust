@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use crate::core::autograd::grad_fn::{BackwardOpKind, maybe_edge};
 use crate::core::dtype::{Float, Numeric};
-use crate::core::node::TensorNode;
+use crate::core::node::{AutogradMeta, TensorNode};
 use crate::core::storage::TensorStorage;
 use crate::core::storage::ops::reduce::{OneHotLabel, resolve_dims};
 use crate::core::tensor::AbstractTensor;
@@ -11,15 +11,11 @@ use crate::core::tensor::ops::math::apply_tensor_op;
 
 impl<T: Numeric> GraphTensor<T> {
     /// Sum over every dimension in `dims` at once.
-    ///
-    /// `dims` are indices into the input tensor and may be non-adjacent, e.g.
-    /// `x.sum(&[0, 2])`. An empty slice aggregates over all dimensions, like
-    /// PyTorch's `torch.sum(x, dim=None)`.
-    ///
-    /// With `keepdim` the reduced dimensions are retained as size 1 (so
-    /// `x.sum(&[0, 2], true)` on `[2, 2, 3]` yields `[1, 2, 1]`), which keeps
-    /// the result broadcastable against the input.
     pub fn sum(&self, dims: &[usize], keepdim: bool) -> GraphTensor<T> {
+        self.sum_with_mode(dims, keepdim, false)
+    }
+
+    pub fn sum_with_mode(&self, dims: &[usize], keepdim: bool, no_grad: bool) -> GraphTensor<T> {
         let dims = resolve_dims(dims, self.shape());
         apply_tensor_op(
             |ops: &[&TensorStorage<T>; 1]| {
@@ -34,17 +30,17 @@ impl<T: Numeric> GraphTensor<T> {
                 dims: dims.clone(),
                 keepdim,
             }),
+            no_grad,
             &[self],
         )
     }
 
     /// Max over every dimension in `dims` at once.
-    ///
-    /// `dims` are indices into the input tensor and may be non-adjacent. An
-    /// empty slice aggregates over all dimensions. Gradient flows to every
-    /// element that attains the per-slice maximum (like `torch.amax`). See
-    /// [`Self::sum`] for the `keepdim` semantics.
     pub fn max(&self, dims: &[usize], keepdim: bool) -> GraphTensor<T> {
+        self.max_with_mode(dims, keepdim, false)
+    }
+
+    pub fn max_with_mode(&self, dims: &[usize], keepdim: bool, no_grad: bool) -> GraphTensor<T> {
         let dims = resolve_dims(dims, self.shape());
         apply_tensor_op(
             |ops: &[&TensorStorage<T>; 1]| {
@@ -59,12 +55,12 @@ impl<T: Numeric> GraphTensor<T> {
                 dims: dims.clone(),
                 keepdim,
             }),
+            no_grad,
             &[self],
         )
     }
 
-    /// Argmax along `dim`, yielding the per-slice flat index as a `f64` tensor
-    /// (labels are consumed by the dtype they are cast to). Non-differentiable.
+    /// Argmax along `dim`, yielding the per-slice flat index as an `f64` tensor.
     pub fn argmax(&self, dim: usize, keepdim: bool) -> GraphTensor<f64> {
         let reduced = TensorStorage::argmax(&self.node.storage, dim);
         let out_store = if keepdim {
@@ -75,9 +71,7 @@ impl<T: Numeric> GraphTensor<T> {
 
         let out_node = TensorNode {
             storage: out_store,
-            requires_grad: false,
-            no_grad: self.is_no_grad(),
-            grad_fn: None,
+            autograd: None,
         };
 
         GraphTensor {
@@ -85,10 +79,16 @@ impl<T: Numeric> GraphTensor<T> {
         }
     }
 
-    /// Direct [m,k] x [k,n] -> [m,n] gemm. 1D operands are treated as [1,k]
-    /// / [k,1] rows/columns (NumPy semantics) and the corresponding axis of the
-    /// result is squeezed away.
+    /// Direct [m,k] x [k,n] -> [m,n] GEMM.
     pub fn matmul(a: &GraphTensor<T>, b: &GraphTensor<T>) -> GraphTensor<T> {
+        Self::matmul_with_mode(a, b, false)
+    }
+
+    pub fn matmul_with_mode(
+        a: &GraphTensor<T>,
+        b: &GraphTensor<T>,
+        no_grad: bool,
+    ) -> GraphTensor<T> {
         let a_shape = a.shape();
         let b_shape = b.shape();
 
@@ -102,41 +102,33 @@ impl<T: Numeric> GraphTensor<T> {
             );
         }
 
-        // Convert 1D inputs to 2D views: a [K] -> [1,K], b [K] -> [K,1]
+        // Convert 1D inputs to 2D views: a [K] -> [1,K], b [K] -> [K,1].
         let a2 = if a_ndim == 1 {
-            a.unsqueeze(0)
+            a.unsqueeze_with_mode(0, no_grad)
         } else {
             a.copy_s()
         };
         let b2 = if b_ndim == 1 {
-            b.unsqueeze(1)
+            b.unsqueeze_with_mode(1, no_grad)
         } else {
             b.copy_s()
         };
 
-        let a2_shape = a2.shape(); // [m, k]
-        let b2_shape = b2.shape(); // [k, n]
-
+        let a2_shape = a2.shape();
+        let b2_shape = b2.shape();
         let k = a2_shape[1];
         let kb = b2_shape[0];
 
         if k != kb {
-            panic!("matmul inner dimensions must match ({} != {})", k, kb);
+            panic!("matmul inner dimensions must match ({} != {}).", k, kb);
         }
 
-        // Direct [m,k] x [k,n] -> [m,n] kernel.
         let out_store = TensorStorage::matmul(&a2.node.storage, &b2.node.storage);
-
-        // Differentiable only for float dtypes (edge-gated); `requires_grad`
-        // follows the edge.
-        let grad_fn = maybe_edge(&[a, b], BackwardOpKind::MatmulOp);
-        let requires_grad = grad_fn.is_some() && (a.requires_grad() || b.requires_grad());
-
+        let autograd =
+            maybe_edge(&[a, b], BackwardOpKind::MatmulOp, no_grad).map(AutogradMeta::Node);
         let out_node = TensorNode {
             storage: out_store,
-            requires_grad,
-            no_grad: a.is_no_grad() || b.is_no_grad(),
-            grad_fn,
+            autograd,
         };
 
         GraphTensor {
@@ -146,48 +138,54 @@ impl<T: Numeric> GraphTensor<T> {
 }
 
 impl<T: Float> GraphTensor<T> {
-    /// Mean over every dimension in `dims` at once. An empty slice aggregates
-    /// over all dimensions. See [`crate::core::tensor::GraphTensor::sum`] for
-    /// the `keepdim` semantics.
+    /// Mean over every dimension in `dims` at once.
     pub fn mean(&self, dims: &[usize], keepdim: bool) -> GraphTensor<T> {
+        self.mean_with_mode(dims, keepdim, false)
+    }
+
+    pub fn mean_with_mode(&self, dims: &[usize], keepdim: bool, no_grad: bool) -> GraphTensor<T> {
         let dims = resolve_dims(dims, self.shape());
         let count: usize = dims.iter().map(|&d| self.shape()[d]).product();
         let count_t = T::from_f64(count as f64);
-        &self.sum(&dims, keepdim) / count_t
+        self.sum_with_mode(&dims, keepdim, no_grad)
+            .div_with_mode(&GraphTensor::new(vec![], count_t, false), no_grad)
     }
 
     /// 2D average pooling over a `[batch, channel, height, width]` input.
-    ///
-    /// Fuses the pooling kernel (window mean over `kernel`, sampled every
-    /// `stride`), rather than composing slices + means, so any kernel/stride
-    /// combination — including overlapping windows — works. Output sizes are
-    /// `(h - kh) / sh + 1` and `(w - kw) / sw + 1` (floor mode, no padding);
-    /// the window must fit entirely in the input. Gradient flows to every input
-    /// position (divided by `kh * kw`, accumulated across overlapping windows),
-    /// but the produced gradient is a graph boundary, so this op cannot be
-    /// differentiated through a second time (like `one_hot`/`argmax`).
     pub fn avg_pool2d(&self, kernel: (usize, usize), stride: (usize, usize)) -> GraphTensor<T> {
+        self.avg_pool2d_with_mode(kernel, stride, false)
+    }
+
+    pub fn avg_pool2d_with_mode(
+        &self,
+        kernel: (usize, usize),
+        stride: (usize, usize),
+        no_grad: bool,
+    ) -> GraphTensor<T> {
         apply_tensor_op(
             |ops: &[&TensorStorage<T>; 1]| TensorStorage::avg_pool2d(ops[0], kernel, stride),
             Some(BackwardOpKind::AvgPool2dOp { kernel, stride }),
+            no_grad,
             &[self],
         )
     }
 
     /// 2D maximum pooling over a `[batch, channel, height, width]` input.
-    ///
-    /// Windows are valid (no padding), and output dimensions use floor mode:
-    /// `(h - kh) / sh + 1` and `(w - kw) / sw + 1`. The logical input indices of
-    /// all tied maxima are cached in the autograd operation; backward splits the
-    /// upstream gradient evenly among them.
     pub fn max_pool2d(&self, kernel: (usize, usize), stride: (usize, usize)) -> GraphTensor<T> {
-        if !self.requires_grad() || self.is_no_grad() {
+        self.max_pool2d_with_mode(kernel, stride, false)
+    }
+
+    pub fn max_pool2d_with_mode(
+        &self,
+        kernel: (usize, usize),
+        stride: (usize, usize),
+        no_grad: bool,
+    ) -> GraphTensor<T> {
+        if no_grad || !self.requires_grad() {
             let storage = TensorStorage::max_pool2d(&self.node.storage, kernel, stride);
             let out_node = TensorNode {
                 storage,
-                requires_grad: false,
-                no_grad: self.is_no_grad(),
-                grad_fn: None,
+                autograd: None,
             };
             return GraphTensor {
                 node: Rc::new(out_node),
@@ -201,14 +199,8 @@ impl<T: Float> GraphTensor<T> {
             stride,
             max_indices: Rc::new(max_indices),
         };
-        let grad_fn = maybe_edge(&[self], grad_op);
-        let requires_grad = grad_fn.is_some() && self.requires_grad();
-        let out_node = TensorNode {
-            storage,
-            requires_grad,
-            no_grad: self.is_no_grad(),
-            grad_fn,
-        };
+        let autograd = maybe_edge(&[self], grad_op, no_grad).map(AutogradMeta::Node);
+        let out_node = TensorNode { storage, autograd };
 
         GraphTensor {
             node: Rc::new(out_node),
@@ -217,18 +209,14 @@ impl<T: Float> GraphTensor<T> {
 }
 
 impl<T: Numeric + OneHotLabel> GraphTensor<T> {
-    /// One-hot encode the labels in `self` into a fresh tensor of shape
-    /// `self.shape ++ [num_classes]`. Labels may be floats (validated integral,
-    /// non-negative) or integers; the output is `f64` (`1.0`/`0.0`), the
-    /// representation the softmax-loss path consumes. Non-differentiable.
+    /// One-hot encode labels into a fresh tensor of shape
+    /// `self.shape ++ [num_classes]`.
     pub fn one_hot(&self, num_classes: usize) -> GraphTensor<f64> {
         let out_storage = TensorStorage::one_hot(&self.node.storage, num_classes);
 
         let out_node = TensorNode {
             storage: out_storage,
-            requires_grad: false,
-            no_grad: self.is_no_grad(),
-            grad_fn: None,
+            autograd: None,
         };
 
         GraphTensor::<f64> {

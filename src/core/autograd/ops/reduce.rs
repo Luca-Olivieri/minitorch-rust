@@ -119,9 +119,7 @@ impl<T: Float> GradRule<1, T> for AvgPool2dOp {
             // higher-order pass through pooling as a clear panic.
             let out_node = TensorNode {
                 storage: dx,
-                requires_grad: false,
-                no_grad: false,
-                grad_fn: None,
+                autograd: None,
             };
 
             GraphTensor {
@@ -160,9 +158,7 @@ impl<T: Float> GradRule<1, T> for MaxPool2dOp {
             // intentionally not differentiable a second time.
             let out_node = TensorNode {
                 storage: dx,
-                requires_grad: false,
-                no_grad: false,
-                grad_fn: None,
+                autograd: None,
             };
 
             GraphTensor {

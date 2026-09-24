@@ -299,8 +299,7 @@ fn try_accumulate_inplace<T: Float>(a: &mut GraphTensor<T>, b: &GraphTensor<T>) 
 
     // First-order path only: this accumulated gradient no longer carries graph
     // structure (matching compute_operands_grad's stripping of intermediate grads).
-    node.requires_grad = false;
-    node.grad_fn = None;
+    node.autograd = None;
 
     true
 }

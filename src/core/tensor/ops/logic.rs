@@ -22,9 +22,7 @@ impl GraphTensor<bool> {
         GraphTensor {
             node: Rc::new(TensorNode {
                 storage: out,
-                requires_grad: false,
-                no_grad: self.is_no_grad(),
-                grad_fn: None,
+                autograd: None,
             }),
         }
     }
@@ -40,9 +38,7 @@ fn binary_bool(
     GraphTensor {
         node: Rc::new(TensorNode {
             storage: out,
-            requires_grad: false,
-            no_grad: a.is_no_grad() || b.is_no_grad(),
-            grad_fn: None,
+            autograd: None,
         }),
     }
 }

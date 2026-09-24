@@ -152,6 +152,17 @@ pub fn conv2d_with_options<T: Numeric>(
     padding: Conv2dPadding,
     dilation: Size2,
 ) -> GraphTensor<T> {
+    conv2d_with_options_with_mode(input, weight, stride, padding, dilation, false)
+}
+
+pub fn conv2d_with_options_with_mode<T: Numeric>(
+    input: &GraphTensor<T>,
+    weight: &GraphTensor<T>,
+    stride: Size2,
+    padding: Conv2dPadding,
+    dilation: Size2,
+    no_grad: bool,
+) -> GraphTensor<T> {
     if input.shape().len() != 4 {
         panic!(
             "conv2d expects a [batch, in_channel, height, width] input, got shape {:?}.",
@@ -210,7 +221,7 @@ pub fn conv2d_with_options<T: Numeric>(
     {
         input.copy_s()
     } else {
-        input.pad(&pads)
+        input.pad_with_mode(&pads, no_grad)
     };
 
     let mut acc: Option<GraphTensor<T>> = None;
@@ -218,39 +229,42 @@ pub fn conv2d_with_options<T: Numeric>(
         for j in 0..kernel.width {
             // Window [B, in_ch, out_h, out_w] for this tap, sampled at the
             // configured stride and dilation.
-            let window = padded_input.slice_strided(&[
-                (0, batch, 1),
-                (0, in_ch, 1),
-                (i * dilation.height, out_h, stride.height),
-                (j * dilation.width, out_w, stride.width),
-            ]);
+            let window = padded_input.slice_strided_with_mode(
+                &[
+                    (0, batch, 1),
+                    (0, in_ch, 1),
+                    (i * dilation.height, out_h, stride.height),
+                    (j * dilation.width, out_w, stride.width),
+                ],
+                no_grad,
+            );
 
             // Weight slice [in_ch, out_ch] for this tap: [in_ch, out_ch, 1, 1]
             // with the singleton kernel axes squeezed away.
             let kernel_slice = weight
-                .slice(&[(0, in_ch), (0, out_ch), (i, 1), (j, 1)])
-                .squeeze(2)
-                .squeeze(2);
+                .slice_with_mode(&[(0, in_ch), (0, out_ch), (i, 1), (j, 1)], no_grad)
+                .squeeze_with_mode(2, no_grad)
+                .squeeze_with_mode(2, no_grad);
 
             // [B, in_ch, out_h, out_w] -> [B, out_h, out_w, in_ch] (two
             // transposes build any 4D permutation), flattened to the 2D
             // [B*out_h*out_w, in_ch] matrix the matmul kernel needs.
             let flat = window
-                .transpose(1, 2)
-                .transpose(2, 3)
-                .reshape(&[batch * out_h * out_w, in_ch]);
+                .transpose_with_mode(1, 2, no_grad)
+                .transpose_with_mode(2, 3, no_grad)
+                .reshape_with_mode(&[batch * out_h * out_w, in_ch], no_grad);
 
-            let result = GraphTensor::matmul(&flat, &kernel_slice);
+            let result = GraphTensor::matmul_with_mode(&flat, &kernel_slice, no_grad);
 
             // Back to [B, out_h, out_w, out_ch], then [B, out_ch, out_h, out_w].
             let tap = result
-                .reshape(&[batch, out_h, out_w, out_ch])
-                .transpose(2, 3)
-                .transpose(1, 2);
+                .reshape_with_mode(&[batch, out_h, out_w, out_ch], no_grad)
+                .transpose_with_mode(2, 3, no_grad)
+                .transpose_with_mode(1, 2, no_grad);
 
             acc = match acc {
                 None => Some(tap),
-                Some(prev) => Some(&prev + &tap),
+                Some(prev) => Some(prev.add_with_mode(&tap, no_grad)),
             };
         }
     }
@@ -287,14 +301,13 @@ impl Linear {
 
 impl Forward1 for Linear {
     fn forward(&self, input: &GraphTensor, no_grad: bool) -> GraphTensor {
-        let input = input.with_no_grad(no_grad);
-        let mult = GraphTensor::matmul(&input, &self.weight);
+        let mult = GraphTensor::matmul_with_mode(input, &self.weight, no_grad);
 
         // `b` has shape [out_features], `mult` [batch, out_features]: the `+`
         // broadcasts the bias across the batch dim automatically.
         match &self.bias {
             None => mult,
-            Some(b) => &mult + b,
+            Some(b) => mult.add_with_mode(b, no_grad),
         }
     }
 }
@@ -461,13 +474,13 @@ impl Conv2d {
 
 impl Forward1 for Conv2d {
     fn forward(&self, input: &GraphTensor, no_grad: bool) -> GraphTensor {
-        let input = input.with_no_grad(no_grad);
-        let conv = conv2d_with_options(
-            &input,
+        let conv = conv2d_with_options_with_mode(
+            input,
             &self.weight,
             self.stride,
             self.padding,
             self.dilation,
+            no_grad,
         ); // [B, out_ch, out_h, out_w]
 
         // `b` is [out_ch]; the result is [B, out_ch, out_h, out_w], so it must
@@ -476,8 +489,11 @@ impl Forward1 for Conv2d {
         match &self.bias {
             None => conv,
             Some(b) => {
-                let b_4d = b.unsqueeze(0).unsqueeze(2).unsqueeze(2);
-                &conv + &b_4d
+                let b_4d = b
+                    .unsqueeze_with_mode(0, no_grad)
+                    .unsqueeze_with_mode(2, no_grad)
+                    .unsqueeze_with_mode(2, no_grad);
+                conv.add_with_mode(&b_4d, no_grad)
             }
         }
     }
@@ -506,9 +522,7 @@ impl Module for AvgPool2d {}
 
 impl Forward1 for AvgPool2d {
     fn forward(&self, input: &GraphTensor, no_grad: bool) -> GraphTensor {
-        input
-            .with_no_grad(no_grad)
-            .avg_pool2d(self.kernel, self.stride)
+        input.avg_pool2d_with_mode(self.kernel, self.stride, no_grad)
     }
 }
 
@@ -535,8 +549,6 @@ impl Module for MaxPool2d {}
 
 impl Forward1 for MaxPool2d {
     fn forward(&self, input: &GraphTensor, no_grad: bool) -> GraphTensor {
-        input
-            .with_no_grad(no_grad)
-            .max_pool2d(self.kernel, self.stride)
+        input.max_pool2d_with_mode(self.kernel, self.stride, no_grad)
     }
 }

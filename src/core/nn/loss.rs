@@ -30,22 +30,22 @@ impl Loss for CrossEntropyLoss {
         let ndim = logits.shape().len();
         if ndim == 0 {
             let logp = self.log_softmax.forward(logits, no_grad);
-            let loss = -&(targets * &logp);
-            return loss.mean(&[], false);
+            let loss = targets.mul_with_mode(&logp, no_grad).neg_with_mode(no_grad);
+            return loss.mean_with_mode(&[], false, no_grad);
         }
 
-        let dim = ndim - 1; // cross-entropy over the last dimension;
+        let dim = ndim - 1; // cross-entropy over the last dimension
 
-        // log probabilities computed directly (numerically stable: no ln(0))
+        // Log probabilities computed directly (numerically stable: no ln(0)).
         let log_probs = self.log_softmax.forward(logits, no_grad);
 
-        // elementwise multiply with targets (expects one-hot targets)
-        let mul = targets * &log_probs;
+        // Elementwise multiply with one-hot targets.
+        let mul = targets.mul_with_mode(&log_probs, no_grad);
 
-        // sum over class dimension and take negative
-        let summed = mul.sum(&[dim], false);
-        let loss = -&summed;
+        // Sum over the class dimension and negate.
+        let summed = mul.sum_with_mode(&[dim], false, no_grad);
+        let loss = summed.neg_with_mode(no_grad);
 
-        loss.mean(&[0], false)
+        loss.mean_with_mode(&[0], false, no_grad)
     }
 }

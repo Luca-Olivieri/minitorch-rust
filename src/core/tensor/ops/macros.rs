@@ -36,6 +36,7 @@ macro_rules! impl_tensor_binary_op_trait {
                 apply_tensor_op(
                     |ops: &[&TensorStorage<T>; 2]| $storage_fn(&[ops[0], ops[1]]),
                     Some($crate::core::autograd::grad_fn::BackwardOpKind::$grad_rule),
+                    false,
                     &[self, other],
                 )
             }
@@ -49,6 +50,7 @@ macro_rules! impl_tensor_binary_op_trait {
                 apply_tensor_op(
                     |ops: &[&TensorStorage<T>; 2]| $storage_fn(&[ops[0], ops[1]]),
                     None,
+                    false,
                     &[self, other],
                 )
             }
@@ -74,6 +76,7 @@ macro_rules! impl_tensor_unary_op_trait {
                 apply_tensor_op(
                     |ops: &[&TensorStorage<T>; 1]| $storage_fn(&[ops[0]]),
                     Some($crate::core::autograd::grad_fn::BackwardOpKind::$grad_rule),
+                    false,
                     &[self],
                 )
             }
@@ -90,6 +93,7 @@ macro_rules! impl_tensor_binary_method {
             apply_tensor_op(
                 |ops: &[&TensorStorage<T>; 2]| $storage_fn(&[ops[0], ops[1]]),
                 Some($crate::core::autograd::grad_fn::BackwardOpKind::$grad_rule),
+                false,
                 &[self, other],
             )
         }
@@ -99,6 +103,7 @@ macro_rules! impl_tensor_binary_method {
             apply_tensor_op(
                 |ops: &[&TensorStorage<T>; 2]| $storage_fn(&[ops[0], ops[1]]),
                 None,
+                false,
                 &[self, other],
             )
         }
@@ -125,6 +130,7 @@ macro_rules! impl_tensor_unary_method {
             apply_tensor_op(
                 |ops: &[&TensorStorage<T>; 1]| $storage_fn(&[ops[0]]),
                 Some($crate::core::autograd::grad_fn::BackwardOpKind::$grad_rule),
+                false,
                 &[self],
             )
         }
