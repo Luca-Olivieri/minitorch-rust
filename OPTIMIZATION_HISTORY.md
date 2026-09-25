@@ -1,9 +1,9 @@
 # MNIST Optimization History
 
 This file records the Rust MNIST `SmallCNN` optimization measurements. The
-ten Rust profiles below are transcribed from the recorded optimization runs;
-the measurements are kept at their original precision so that later runs can be
-compared directly.
+first ten Rust profiles are summarized below; later profiles, including the
+threading sweep, are recorded in full below. Measurements are kept at their
+original precision so that later runs can be compared directly.
 
 ## Profiling standard
 
@@ -32,7 +32,8 @@ and validation time.
 - Step `938/938` is the final, smaller batch of the epoch and is not directly
   comparable to the full-size checkpoints. Use the complete epoch time for
   aggregate comparisons.
-- `grads.len() = 8` was reported at every checkpoint in all ten profiles.
+- `grads.len() = 8` was reported at every full-batch checkpoint in every
+  recorded profile.
 - Stages 7 and 8 report the post-accumulation time as `step_time`; earlier
   stages labelled the same field `Optimizer`. The values are directly
   comparable.
@@ -41,7 +42,7 @@ and validation time.
 
 ## Summary
 
-All ten runs use the same dataset sizes reported by the program: 60,000
+All recorded runs use the same dataset sizes reported by the program: 60,000
 training samples, 10,000 test samples, 938 training batches per epoch, and 157
 validation batches.
 
@@ -57,9 +58,15 @@ validation batches.
 | Stride-1/dilation-1 matmul with unit-stride paths | `feature/weird-optimizations*` | 13.369879042 s | 267.85608725 s | 0.3363628374274767 | 0.2691631467284183 | 13.462407916 s |
 | Register-blocked conv accumulator | `feature/weird-optimizations*` | 10.484789333 s | 234.81543525 s | 0.3363628374274767 | 0.2691631467284183 | 10.455207417 s |
 | Position-tiled `grad_weight` | `feature/weird-optimizations*` | 10.406701042 s | 229.711056 s | 0.33636283742747686 | 0.26916314672841835 | 10.493345833 s |
+| `max_pool2d_backward` fast path (reverted) | `feature/weird-optimizations*` | 10.457898792 s | 233.695550208 s | 0.33636283742747686 | 0.26916314672841835 | 10.475820292 s |
+| Batch-parallel `grad_input`, 1 worker | `feature/weird-optimizations*` | 10.569629583 s | 227.564065542 s | 0.33636283742747686 | 0.26916314672841835 | 10.769859125 s |
+| Batch-parallel `grad_input`, 2 workers | `feature/weird-optimizations*` | 10.510451208 s | 201.891501334 s | 0.33636283742747686 | 0.26916314672841835 | 10.564413333 s |
+| Batch-parallel `grad_input`, 4 workers (Stages 11–12) | `feature/weird-optimizations*` | 10.398292375 s | 193.03315625 s | 0.33636283742747686 | 0.26916314672841835 | 10.471934791 s |
+| Batch-parallel `grad_input`, 8 workers | `feature/weird-optimizations*` | 10.758061 s | 189.177429041 s | 0.33636283742747686 | 0.26916314672841835 | 10.539541958 s |
 
-The ten profiles follow the same measurement boundary: initial evaluation,
-all 938 epoch-1 training batches, and validation on 157 test batches.
+The first ten profiles follow the same measurement boundary: initial evaluation,
+all 938 epoch-1 training batches, and validation on 157 test batches. Later
+profiles use the same boundary and are recorded in their respective stages.
 
 **Loss values stop being bit-identical at Stage 9.** Stages 0 through 8 all
 report `0.3363628374274767` and `0.2691631467284183`; Stage 9 reports
@@ -1231,6 +1238,242 @@ by `tests/nn/maxpool2d.rs`.
   control drift itself is now `1%`, which is the same size as most of the
   individual optimisations still on the list.
 
+## 11. Batch-parallel convolution input gradient
+
+**Source label:** `Batch-parallel convolution input gradient`
+**Branch:** `feature/weird-optimizations*`
+**Command:** `MINITORCH_THREADS=4 MINITORCH_PROFILE_LAYERS=true make run-release`
+**Configuration:** `epochs: 1`
+**Status:** measured through first-epoch validation
+
+The first step of the multithreading work, and the first change in this project
+to use more than one core. `conv2d_grad_input_stride1_dilation1` was split into
+a batch-range worker and a driver that fans out over the batch with
+`std::thread::scope`, one scoped thread per chunk. No dependency is added, the
+autograd graph and its `Rc` are untouched, and `chunks_mut` supplies the
+disjoint output slices so no synchronisation or ownership transfer is needed.
+
+Two properties make this kernel a good first target and the results
+trustworthy:
+
+- **Every byte of `packed_grad_output` is read exactly once regardless of thread
+  count.** Total memory traffic is unchanged by splitting; only the arithmetic is
+  divided. The measured `3.89×` on four threads is close to linear, which is
+  what that access pattern predicts and what a bandwidth-bound kernel would not
+  give.
+- **The result is bit-identical at any thread count.** Batch entries are
+  disjoint, so each output element's reduction over output channels is performed
+  entirely within one thread and its order cannot change. This is stronger than
+  the tile-based changes, where grouping into partials was itself a
+  reassociation.
+
+The worker count comes from `MINITORCH_THREADS`, defaulting to
+`available_parallelism()`, so one binary can be swept without a rebuild and
+`MINITORCH_THREADS=1` gives an exact serial baseline in the same build.
+
+Correctness was verified across widths: the full suite of 234 tests passes at
+`MINITORCH_THREADS` of 1, 2, 3, 5, 7, 8, and 16. The prime widths matter because
+they do not divide the batch and so exercise the tail-chunk path, which the
+default configuration never reaches.
+
+| Metric | Value |
+|---|---:|
+| Dataset setup | 39.319959 ms |
+| Dataloader setup | 0.452333 ms |
+| Model setup | 3.427459 ms |
+| Training samples | 60,000 |
+| Test samples | 10,000 |
+| Training batches | 938 |
+| Validation batches | 157 |
+| Initial loss | 2.3064304231216664 |
+| Initial evaluation | 10.398292375 s |
+| Training time | 193.03315625 s |
+| Smoothed training loss | 0.33636283742747686 |
+| Validation loss | 0.26916314672841835 |
+| Validation time | 10.471934791 s |
+
+### Stage 10 comparison
+
+| Metric | Stage 10, serial | Stage 11, 4 threads | Difference |
+|---|---:|---:|---:|
+| Initial evaluation | 10.457898792 s | 10.398292375 s | −0.6% |
+| **Epoch 1 training** | **233.695550208 s** | **193.03315625 s** | **−40.66 s (−17.4%)** |
+| Validation time | 10.475820292 s | 10.471934791 s | −0.0% |
+
+### Operation-level comparison
+
+Median over the nine full-batch checkpoints, steps 100–900.
+
+| Operation | Stage 10, serial | Stage 11, 4 threads | Speedup |
+|---|---:|---:|---:|
+| Conv2 `grad_input` | 51.930958 ms | 13.353916 ms | **3.89×** |
+| Conv1 `grad_input` | 3.265083 ms | 0.932959 ms | **3.50×** |
+| Conv2 backward total | 101.364750 ms | 60.142750 ms | 1.69× |
+| `conv2d` total | 112.482416 ms | 67.996667 ms | 1.65× |
+| Per-step backward | 165.450917 ms | 122.847250 ms | 1.35× |
+| Conv2 forward | 41.909791 ms | 41.878250 ms | 1.00× *(control)* |
+| `matmul` | 24.265792 ms | 24.284583 ms | 1.00× *(control)* |
+| `linear1` | 3.580042 ms | 3.608708 ms | 0.99× *(control)* |
+| `maximum` | 20.843750 ms | 20.310376 ms | 1.03× *(control)* |
+| `max_pool2d` | 4.206375 ms | 4.128292 ms | 1.02× *(control)* |
+| Conv1 forward | 9.525167 ms | 9.679875 ms | 0.98% *(control)* |
+
+### Effect on the PyTorch comparison
+
+| Metric | PyTorch, 1 thread | Rust Stage 10 | Rust Stage 11 |
+|---|---:|---:|---:|
+| Backward | 59.264 ms | 165.45 ms (2.80×) | 122.85 ms (**2.07×**) |
+| Epoch 1 training | 116.426 s | 233.696 s (2.01×) | 193.033 s (**1.66×**) |
+
+The backward gap narrowed from `2.80×` to `2.07×` and the epoch gap from `1.97×`
+to `1.66×`, in a single step that touched one kernel.
+
+### Optimization review
+
+- **Better:** Conv2 `grad_input` improved `3.89×` and Conv1's `3.50×`, almost
+  linear on four threads, which confirms the kernel was compute-bound with
+  thread-count-independent memory traffic. Epoch-1 training fell by `40.66 s`.
+  Conv1's `grad_input` is the useful negative result: it is small enough that
+  thread-spawn overhead could easily have dominated, and it still gained `3.50×`,
+  so per-call spawning is viable at this kernel size.
+- **Better, and unexamined:** Initial evaluation and validation time are
+  unchanged to within `0.6%` and `0.0%`. Neither runs a backward pass, so this
+  is the expected result and confirms the split touches only what it should.
+- **Unchanged:** Every serial control is flat to within `2%`. Smoothed training
+  loss and validation loss are bit-identical to Stages 9 and 10, as the disjoint
+  batch decomposition guarantees.
+- **Worse: nothing.** Conv1 forward rose `1.6%` and `add` rose `11.8%`, but step
+  700 recorded `add` at `11.692041 ms` against a median near `2.9 ms` and a
+  backward of `135.378833 ms` against a median near `122.8 ms`. Both are
+  transient outliers in a run that also completed in `3m 35s` wall time against
+  `4m 27s` previously, so the machine was in a different thermal state.
+- **A methodological problem this run exposes.** Conv2 `grad_weight` moved
+  `45.490042 → 42.127667 ms`, a `7.4%` improvement, in code this change does not
+  touch and which runs before any thread is spawned. That is far larger than the
+  `1%` control drift estimated from Stage 10, which means **cross-session
+  comparisons carry several percent of noise**, and Stage 10's apparent `1.7%`
+  regression may have been partly the same effect. The `3.89×` on `grad_input` is
+  far outside that band and is not in doubt, but no smaller effect measured
+  across two sessions should be. A `MINITORCH_THREADS` sweep run as a single
+  session is the clean experiment, since every width is then measured against
+  the same machine state.
+
+## 12. Thread-width sweep
+
+**Source label:** `Thread-width sweep`
+**Branch:** `feature/weird-optimizations*`
+**Commands:**
+`MINITORCH_THREADS={1,2,4,8} MINITORCH_PROFILE_LAYERS=true make run-release`
+**Configuration:** `epochs: 1`
+**Status:** four profiled widths; the one-worker run is the current serial
+reference
+
+Same binary and same kernel as Stage 11, run at one, two, four, and eight
+workers. This is one experiment with four points, recorded together so the
+scaling curve can be read off a single table. Each width was a separate
+process, so the sweep is not a same-process A/B test; the serial controls below
+quantify the residual cross-session variation.
+
+| Metric | Value |
+|---|---:|
+| Epoch 1 training, 1 worker | 227.564065542 s |
+| Epoch 1 training, 2 workers | 201.891501334 s |
+| Epoch 1 training, 4 workers | 193.03315625 s |
+| Epoch 1 training, 8 workers | 189.177429041 s |
+| Initial evaluation, 1 / 2 / 4 / 8 | 10.569629583 / 10.510451208 / 10.398292375 / 10.758061 s |
+| Validation time, 1 / 2 / 4 / 8 | 10.769859125 / 10.564413333 / 10.471934791 / 10.539541958 s |
+| Smoothed training loss, all widths | 0.33636283742747686 |
+| Validation loss, all widths | 0.26916314672841835 |
+
+### Scaling of the parallelised kernel
+
+| Workers | Conv2 `grad_input` | Speedup | Efficiency |
+|---:|---:|---:|---:|
+| 1 | 48.173167 ms | 1.00× | — |
+| 2 | 24.687042 ms | **1.95×** | 98% |
+| 4 | 13.353916 ms | **3.61×** | 90% |
+| 8 | 11.545375 ms | **4.17×** | 52% |
+
+### Whole-model effect
+
+| Workers | Per-step backward* | Epoch 1 training | vs PyTorch |
+|---:|---:|---:|---:|
+| 1 | 161.341750 ms | 227.564065542 s | 1.95× |
+| 2 | 133.211916 ms | 201.891501334 s | 1.73× |
+| 4 | 122.847250 ms | 193.03315625 s | 1.66× |
+| 8 | 119.900291 ms | 189.177429041 s | **1.62×** |
+
+\* Median of the eight regular full-batch checkpoints at steps 100–800; step
+900 is a whole-run outlier and is excluded.
+
+### Controls
+
+Mid-run serial code paths at each width, reported as the median of the eight
+full-batch checkpoints at steps 100–800. Step 900 is excluded because every
+section, including the parallel one, inflated together. None of these paths is
+affected by the worker count, so their spread measures session drift.
+
+| Operation | 1 worker | 2 workers | 4 workers | 8 workers | Spread |
+|---|---:|---:|---:|---:|---:|
+| Conv2 `grad_weight` | 42.455313 ms | 42.364166 ms | 42.127667 ms | 42.265667 ms | 0.8% |
+| Conv2 forward | 42.333000 ms | 41.861125 ms | 41.878250 ms | 41.728333 ms | 1.4% |
+| `matmul` | 24.262687 ms | 24.315209 ms | 24.284583 ms | 24.377958 ms | 0.5% |
+| `maximum` | 20.144208 ms | 20.313667 ms | 20.310376 ms | 20.564916 ms | 1.0% |
+| `linear1` | 3.572979 ms | 3.597458 ms | 3.608708 ms | 3.588708 ms | 1.0% |
+
+Conv1 `grad_input`, which is parallelised, scales `3.056`, `1.618`, `0.933`,
+and `0.850 ms` across the same four widths.
+
+### Optimization review
+
+- **Better:** `grad_input` scales at `98%` efficiency on two workers and `90%` on
+  four, then drops to `52%` on eight. The curve is the expected shape: near
+  linear to the core count, then flat.
+- **The ceiling is four.** Eight workers reduce the kernel time by `14%` over
+  four (`13.35 → 11.55 ms`) and epoch time by `2.0%`. The machine has four
+  performance cores and the efficiency cores contribute little to a kernel of
+  this shape. **There is nothing meaningful left in thread count.** The
+  `available_parallelism()` default of eight is safe rather than harmful, so it
+  can stay, but going wider is pointless.
+- **Unchanged:** Smoothed training loss and validation loss are bit-identical at
+  every width and to every run since Stage 9, as the disjoint batch
+  decomposition guarantees. Conv1's `grad_input` scales cleanly at all four
+  widths, confirming per-call spawning still pays at `3 ms` of work.
+- **The Stage 10 anomaly is now materially accounted for, and it was not
+  small.** With a one-worker run in hand, the two serial kernels that Stage 10
+  measured can be compared directly against this one:
+
+  | Kernel | Stage 10 | 1 worker today | Offset |
+  |---|---:|---:|---:|
+  | Conv2 `grad_weight` | 45.490042 ms | 42.455313 ms | +7.2% |
+  | Conv2 `grad_input` | 51.930958 ms | 48.173167 ms | +7.8% |
+
+  Two independent kernels are high by almost exactly the same amount in that
+  single session. That is consistent with a machine-wide offset, rather than a
+  property of either kernel, and it retires the "unexplained 7.4% move" that
+  Stage 11 could only leave open. It also means **Stage 10's `1.7%` regression
+  claim is not supportable**: the implementation was correctly reverted, but
+  the experiment established no measured regression, only a null result.
+- **A correction to Stage 11's own reasoning, now settled by measurement.**
+  Stage 11 used initial evaluation and validation as drift indicators, on the
+  grounds that neither runs a backward pass. The controls table shows the
+  opposite: those two phases vary by `3.5%` and `2.8%` across the four widths,
+  while mid-run serial sections vary by `0.5–1.4%`. Initial evaluation runs
+  before thermal steady state and so samples a different machine state. **Use a
+  mid-run serial section as the drift reference, never the opening evaluation.**
+- **Cross-session drift is real but bounded in recent runs.** Mid-run serial
+  controls hold within `0.5–1.4%` across four separate processes, which is the
+  figure future comparisons should be judged against. Stage 10 is the exception:
+  its two relevant kernels were both about `7–8%` high, so it must not be used as
+  the serial reference.
+- **A new variance source, now measured.** With one kernel split, a straggler
+  thread stalls the join. The eight-thread profile recorded `grad_input`
+  outliers of `13.70` and `14.95 ms` against a median of `11.55`; the two-worker
+  profile shows the same at `26.46 ms`; this serial profile has a whole-step
+  outlier at step 900 where *every* layer inflated together. Future parallel
+  sections will carry this tail, and it will grow as more kernels are split.
+
+
 ## Observations and next measurements
 
 - The loss values are bit-identical across Stages 0 through 8 and diverge at
@@ -1250,11 +1493,11 @@ by `tests/nn/maxpool2d.rs`.
   path gained contiguous access and lost its accumulator traffic but gained no
   SIMD. Fixing it needs a two-dimensional register tile with `k` innermost, which
   is a larger change than the two unit-stride paths used here.
-- Conv2 `grad_input` at `51.848875 ms` is now the largest single convolution
-  section, ahead of `grad_weight` at `45.391417 ms`. It is the one large
-  convolution kernel still running the pre-Stage-8 shape, and its two residual
-  costs are two bounds-check branches and a stack reload of the tile length per
-  iteration.
+- Conv2 `grad_input` is now threaded, so the largest untouched convolution
+  sections are `grad_weight` at about `42.3 ms` and the convolution forward at
+  about `41.7 ms`. Both read distinct batch slices and are the next parallel
+  candidates. The residual bounds checks and tile-length reload noted earlier
+  remain secondary to that work.
 - `maximum` is the one large code path in the model that has resisted
   optimization. Stage 10 removed a floating-point division from it and gained
   nothing measurable, which points at the scatter's irregular write pattern
@@ -1270,13 +1513,15 @@ by `tests/nn/maxpool2d.rs`.
   came from the instruction stream, not from a model. Adopt that as the rule:
   disassemble, then decide, and treat any timing prediction as unverified until
   the profile confirms it.
-- Medians over the nine logged checkpoints are not a reliable predictor of epoch
-  time: in Stage 10 they implied `+0.45 s` against a measured `+3.98 s`. Use
-  epoch and validation totals for decisions and logged medians only for
-  attribution within a single run.
-- Control drift is now around `1%` per run, which is the same magnitude as most
-  remaining candidate optimisations. Differences below roughly `2%` should not
-  be treated as signal without a repeat run.
+- Medians of the nine logged full-batch checkpoints are not a reliable
+  predictor of epoch time: in Stage 10 they implied `+0.45 s` against a measured
+  `+3.98 s`. The current sweep also shows why a whole-step outlier must be
+  excluded rather than averaged in. Use epoch and validation totals for
+  decisions and medians only for attribution within a single run.
+- Recent mid-run serial controls vary by `0.5–1.4%` across the four width runs.
+  Differences below roughly `2%` should therefore not be treated as signal
+  without a repeat run; Stage 10 is a documented exception rather than the
+  expected drift level.
 - Conv1's position-tiling regression suggests the tile needs a size guard keyed
   on `in_channels × out_channels`, since a layer with one input channel has
   nine taps and cannot amortise the per-tile setup. This needs a structural
@@ -1286,30 +1531,56 @@ by `tests/nn/maxpool2d.rs`.
   models are reliable for ruling a change *out* and for confirming that codegen
   changed as intended, and unreliable for sizing the wall-clock effect. Treat
   future estimates as unverified until a profile confirms them.
-- The single-threaded PyTorch reference completes epoch 1 in `116.426 s` against
-  Rust's `229.711 s`, a `1.97×` gap, and the gap is almost entirely in the
-  backward pass at `2.80×` while forward is `1.59×` and the two forward-only
-  phases are within `1.14×`–`1.17×`. Effort belongs in backward. The reference
-  script's `torch threads: 1` is an explicit setting, not a PyTorch default, and
-  its ordering relative to the first forward pass is unverified — see the PyTorch
-  reference section.
-- Re-running the PyTorch reference at four threads would settle the largest open
-  question in one run: if its backward scales to roughly a third of `59.3 ms`,
-  threading is a known ~3× on this workload and the Rust port should take it
-  next. If it barely improves, the single-thread convolution gap is real and more
-  register or cache blocking in `grad_input` is still the better investment.
+- The single-threaded PyTorch reference completes epoch 1 in `116.426 s`.
+  Rust's current serial profile is `227.564 s` (`1.95×`), and the default
+  eight-worker profile is `189.177 s` (`1.62×`). Its per-step backward is
+  `119.900 ms` against PyTorch's `59.264 ms` (`2.02×`), down from `2.80×`
+  before threading. The current serial initial evaluation and validation are
+  within `1.19×` and `1.17×` of PyTorch, respectively.
+  **The largest untouched pieces are Conv2 `grad_weight` at about `42.3 ms` and
+  the convolution forward at about `41.7 ms`.**
+- The batch-parallel input gradient scales at `1.95×` on two workers (`98%`
+  efficiency), `3.61×` on four (`90%`), and `4.17×` on eight (`52%`), using the
+  current one-worker `48.17 ms` baseline. **Four workers is the practical
+  ceiling** for this kernel and machine; the remaining gains must come from
+  parallelising more kernels, not from a larger count. `grad_weight` and the
+  convolution forward read distinct batch slices and so should scale, whereas
+  `maximum` is scatter-bound and may not.
+- Recent mid-run serial controls vary by `0.5–1.4%` across separate processes.
+  Initial evaluation and validation vary more (`3.5%` and `2.8%`) because they
+  run before or outside the thermal steady state of the training loop. **Use a
+  mid-run serial section as the drift reference, never the opening
+  evaluation.** Stage 10 is the one documented high-drift session and is not a
+  valid serial reference.
+- Threading introduces a new variance source that did not exist in the serial
+  profile: with one kernel split, a single straggler thread stalls the join, and
+  the eight-thread profile recorded `grad_input` outliers of `13.70` and
+  `14.95` ms against a median of `11.55`. Tail latency in parallel sections
+  should be expected in future medians.
+- `grad_weight` is the next target and needs a reduction: per-thread partial
+  buffers summed at the end. It is already reassociating from the Stage 9
+  position tile, so the reduction adds no new numerical cost.
+- Cross-session drift in recent mid-run serial controls is `0.5–1.4%`, but Stage
+  10 was about `7–8%` high on two separate kernels and must not be used as a
+  control. Compare future changes to the recent one-worker profile and repeat
+  effects below `2%`.
+- Re-running the PyTorch reference at four threads would show whether its
+  `59.3 ms` backward also scales by roughly `3×`, which would set the realistic
+  target for this port.
 - Loss values are not comparable to the PyTorch reference until the seed,
   initialisation, and hyperparameters are matched; the initial losses already
   differ, so the trajectories diverge for that reason alone.
 - Future profiles should record CPU model, commit, dtype, and thread settings
   before making claims that require cross-machine or PyTorch comparisons.
-- Do not extrapolate from individual checkpoints, especially step `938/938`;
-  use the measured epoch and validation totals for comparisons.
+- Do not extrapolate from individual checkpoints: step `938/938` is a half
+  batch, and the one-worker profile's step 900 inflated every section at once.
+  Use epoch and validation totals for decisions, and medians only for
+  within-run attribution.
 
 ## PyTorch reference
 
 The reference run below is a **complete single-threaded PyTorch `float64` CPU
-run of the same MNIST workload**, recorded separately from the ten Rust profiles
+run of the same MNIST workload**, recorded separately from the Rust profiles
 because it is a different implementation and a different run, not a variant of
 the Rust code. It replaces an earlier, partial record that held only one
 checkpoint and no epoch totals; the earlier record's per-checkpoint timings

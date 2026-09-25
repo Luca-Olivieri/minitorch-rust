@@ -903,24 +903,75 @@ specialization. Convolution is not in that situation (§4.5: already `v.2d` at
 full width), which is exactly why its remaining gap needs a different lever:
 removing memory operations, not widening arithmetic.
 
-### 6.9 Kernel-level multithreading
+### 6.9 Kernel-level multithreading — applied, width sweep complete
 
-**Idea:** Partition batch, output-channel, or spatial-tile work across CPU
-cores.
+**Status: the largest single win in the project.** `conv2d_grad_input` is split
+over the batch with `std::thread::scope`; the autograd graph and its `Rc` are
+untouched, since threads live entirely inside the storage kernel. The current
+serial run is the one-worker point in the sweep below, rather than Stage 10.
 
-- **Data access:** Each thread works on a disjoint tile. Input/weight buffers
-  can be shared read-only.
-- **Allocations:** `grad_input` needs per-thread accumulation buffers followed
-  by a reduction, or a synchronization strategy. `grad_weight` similarly needs
-  careful reduction.
-- **Cache locality:** Each core gets a smaller working set, but shared-memory
-  bandwidth and synchronization can offset the gain.
-- **Pros:** Uses all CPU cores and can scale better than single-thread SIMD for
-  large tensors.
-- **Cons:** The autograd graph uses `Rc` and is not currently designed for
-  cross-thread execution. Thread-pool overhead, reduction cost, oversubscription
-  with a threaded BLAS, and nondeterministic accumulation order are concerns.
-  Correctness work is substantial.
+| | 1 worker | 4 workers | Speedup |
+|---|---:|---:|---:|
+| Conv2 `grad_input` | 48.17 ms | 13.35 ms | **3.61×** |
+| Conv1 `grad_input` | 3.06 ms | 0.93 ms | **3.28×** |
+| Epoch 1 training | 227.56 s | 193.03 s | −15.2% |
+
+Two properties made this the right first target, and both are worth checking
+before choosing the next one:
+
+- **Memory traffic is thread-count-independent.** Every byte of
+  `packed_grad_output` is read exactly once no matter how the batch is split, so
+  splitting divides only the arithmetic. The measured `98%` efficiency on two
+  workers and `90%` on four is the signature of a compute-bound kernel with that
+  property; a bandwidth-bound kernel would not give it.
+- **The result is bit-identical at any thread count.** Batch entries are
+  disjoint, so each output element's reduction over output channels happens
+  entirely inside one thread and its order cannot change. This is stronger than
+  the tile changes, where grouping into partials was itself a reassociation.
+
+- **Data access:** Disjoint batch entries, so no synchronisation at all. Output
+  slices come from `chunks_mut`; upstream slices line up because both buffers are
+  batch-major. `packed_weight` is shared read-only.
+- **Allocations:** None. Threads borrow within the scope.
+- **Cache locality:** Each core gets a smaller slice of `packed_grad_output`.
+  The shared `packed_weight` is small enough to stay in the shared L2.
+- **Pros:** No dependency (`std::thread::scope` is std), no `unsafe`, no
+  autograd changes, and the autograd graph's `Rc` is not a blocker because
+  threads never cross it. Conv1's `3.28×` shows per-call spawning still wins at
+  `3.1 ms` of work, so a thread pool is not yet necessary.
+- **Cons:** `grad_weight` and matmul's `grad_b` sum over the batch and need
+  per-thread partial buffers plus a final reduction, which reintroduces a
+  reassociation (already accepted for `grad_weight`). `maximum` is
+  scatter-bound and may not scale at all. Thread-spawn cost is paid per kernel
+  call, so small kernels will eventually stop being worth splitting. The worker
+  count is tunable, but `available_parallelism()` reports 8 on a machine with 4
+  performance cores and macOS does not let the process pin threads to core
+  types.
+- **Tuning:** `MINITORCH_THREADS` overrides the count, defaulting to
+  `available_parallelism()`. `MINITORCH_THREADS=1` gives an exact serial
+  baseline in the same binary. A width sweep gives the full curve:
+
+| Workers | Conv2 `grad_input` | Speedup | Efficiency |
+|---:|---:|---:|---:|
+| 1 | 48.17 ms | 1.00× | — |
+| 2 | 24.69 ms | 1.95× | 98% |
+| 4 | 13.35 ms | 3.61× | 90% |
+| 8 | 11.55 ms | 4.17× | 52% |
+
+**Four workers is the practical ceiling.** Eight reduces the kernel time by
+`14%` over four (`13.35 → 11.55 ms`) and epoch time by `2.0%`, because the four
+efficiency cores contribute little to a kernel of this shape. The default of
+eight is safe rather than harmful, so it can stay, but going wider is pointless.
+These are four separate processes, not a single-process sweep; recent mid-run
+serial controls vary by `0.5–1.4%`. Stage 10, whose serial kernels were about
+`7–8%` high, must not be used as the baseline.
+- **Verification:** The full suite of 234 tests passes at `MINITORCH_THREADS` of
+  1, 2, 3, 5, 7, 8, and 16. The prime widths do not divide the batch and so
+  cover the tail-chunk path, which the default configuration never reaches.
+- **New variance source:** splitting introduces tail latency that did not exist
+  when the profile was serial. The eight-thread run recorded `grad_input`
+  outliers of `13.70` and `14.95` ms against a median of `11.55`, because one
+  straggler thread stalls the join. Expect this in future parallel medians.
 
 ### 6.10 Fused bias and small elementwise operations
 
@@ -943,49 +994,47 @@ analysis in §4.5. §4.6 records the one item already delivered.
    backward `42.95 → 24.33 ms`, `linear1` forward `16.54 → 3.57 ms`, losses
    bit-identical.
 1. **Done: register-blocked conv accumulator (§6.3).** Applied to the forward
-   loop and to `grad_input`, measured. Conv2 forward `59.15 → 41.65 ms`
-   (−29.6%), Conv2 `grad_input` `65.06 → 51.16 ms` (−21.4%), losses
-   bit-identical. Epoch-1 training `267.9 → 234.8 s`.
+   loop and to `grad_input`. Conv2 forward `59.15 → 41.65 ms` (−29.6%), Conv2
+   `grad_input` `65.06 → 51.16 ms` (−21.4%).
 2. **Done: position-tiled `grad_weight` (§6.4).** Conv2 `grad_weight`
-   `51.07 → 45.39 ms` (−11.1%), epoch-1 training `234.8 → 229.7 s`. Predicted
-   `30–40 ms`, delivered `45.39 ms` — the third consecutive over-prediction, now
-   a consistent factor of roughly two. One open item: Conv1's `grad_weight`
-   regressed `2.54 → 3.04 ms` because a single-input-channel layer has nine taps
-   and cannot amortise the per-tile setup. A size guard on
-   `in_channels * out_channels` would recover `0.50 ms` per step, but it needs a
-   structural predicate rather than a bare constant, and that is a decision to
-   make explicitly.
-3. **Target `max_pool2d_backward` (`reduce.rs`).** `20.23 ms`, stable across
-   four profiles, third-largest backward category, and never attempted. The
-   inner loop carries a bounds check with a `panic!` per scattered element and
-   iterates the upstream gradient through a `strided_indices()` div/mod
-   iterator. Unlike the tiling work its problem is structural rather than a tight
-   optimization race, which makes it the cheapest unexplored code in the model.
-4. **Remove the residual overhead in the tiled loops (§4.5).** `grad_input` is
-   now the largest single convolution section at `51.85 ms`, and it still runs
-   the pre-Stage-8 shape with two bounds-check branches and a stack reload of the
-   tile length per iteration. It is also the one large convolution kernel with no
-   measured improvement since Stage 8.
-5. **Use `f64::mul_add` (§6.8).** Zero dependency and strictly more accurate.
-   The tiled loops now run at 35–45% of FP64 peak, up from 28–35%, so there is
-   less headroom in the FMA pipes than there was when this item was written.
-   Still nearly free, but a smaller prize.
-6. **Avoid materializing the padded input (§6.2).** `2.00 ms` for Conv2 and
-   `0.24 ms` for Conv1. Worth less now that the arithmetic loops are no longer
-   at ~84% of their load-port limit.
-7. **Consider im2col plus a custom GEMM (§6.6) last.** The direct kernels are
-   now at 35–45% of peak, which weakens the case considerably: im2col adds a
-   ~29 MiB buffer and its own passes on top of loops that are no longer
-   obviously inefficient.
-8. **Treat native BLAS (§6.7) and multithreading (§6.9) as separate
-   architectural/dependency decisions.** Neither is warranted before items 3–4
-   are exhausted; both would multiply an already-serial pipeline rather than fix
-   its arithmetic intensity.
-9. **Do not reintroduce per-tap output-channel chunk blocking (§5.1);** it was
-   measured to regress badly, and §6.3 is the structurally different
-   replacement for the same idea.
-10. **Do not pursue a parameter-resident packed weight (§6.1).** Measured at
-    `0.02 ms` per call; it cannot return more than a rounding error.
+   `51.07 → 45.39 ms` (−11.1%). One open item: Conv1's `grad_weight` regressed
+   `2.54 → 3.04 ms` because a single-input-channel layer has nine taps and cannot
+   amortise the per-tile setup. A size guard would recover `0.50 ms` per step
+   but needs a structural predicate, not a bare constant.
+3. **Done: batch-parallel `grad_input` (§6.9).** `48.17 → 13.35 ms` on four
+   workers, a `3.61×` speedup, and bit-identical at any worker count. Epoch-1
+   training `227.56 → 193.03 s`. The PyTorch backward gap narrowed from `2.80×`
+   to `2.07×`; the default eight-worker profile reaches `2.02×`.
+4. **Parallelise `grad_weight` over the batch (§6.9).** Now the largest untouched
+   convolution section at `42.13 ms`, and the largest remaining piece of the
+   PyTorch backward gap. Needs a reduction: per-thread partial buffers summed at
+   the end. Already reassociating from §6.4, so the reduction adds no new
+   numerical cost. Its memory traffic should also be thread-count-independent in
+   the way `grad_input`'s was, which is the property to check before expecting
+   a similar result.
+5. **Parallelise the convolution forward (§6.9).** `41.88 ms`, disjoint by
+   batch, no reduction needed. Together with item 4 this is ~84 ms of a ~203 ms
+   step.
+6. **Parallelise matmul backward and `max_pool2d` backward (§6.9).** `24.28` and
+   `20.31 ms`. `grad_a` is disjoint by batch rows; `grad_b` and the pool scatter
+   need a reduction. The pool is scatter-bound, so it may not scale — measure it
+   last.
+7. **Use `f64::mul_add` (§6.8).** Zero dependency and strictly more accurate.
+   The tiled loops run at 35–45% of FP64 peak, so there is less headroom in the
+   FMA pipes than there was when this item was written. Now a much smaller prize
+   next to the remaining parallel work.
+8. **Remove the residual overhead in the tiled loops (§4.5).** Two bounds-check
+   branches and a stack reload of the tile length per iteration in the forward
+   and `grad_input` loops. Smaller in wall-clock terms now that `grad_input` is
+   threaded, and it would be better done after items 4–5.
+9. **Avoid materializing the padded input (§6.2).** `2.00 ms` for Conv2 and
+   `0.24 ms` for Conv1.
+10. **Do not pursue a parameter-resident packed weight (§6.1)** — measured at
+    `0.02 ms` per call — **or im2col plus a custom GEMM (§6.6)**, which now
+    competes badly with using the cores that are already idle.
+11. **Do not reintroduce per-tap output-channel chunk blocking (§5.1);** it was
+    measured to regress badly, and §6.3 is the structurally different
+    replacement for the same idea.
 
 Every change should be evaluated with both:
 
@@ -996,14 +1045,14 @@ MINITORCH_PROFILE_LAYERS=true make run-release
 
 The first measures the clean first-epoch-plus-validation result; the second
 isolates layer and section timings. Note that a profiled run is not directly
-comparable to a clean one, so compare like with like. Section deltas under
-roughly 15% should be treated as scheduler noise, since the process is
-single-threaded on a 4P + 4E machine and migrates between Firestorm
-performance and efficiency cores; a step that regresses in every section at
-once, as steps 200 and 500 did in the latest profile, is a thermal artifact
-rather than a change in behaviour. A correctness change is never accepted on
-timing alone: the smoothed training loss and validation loss must be compared
-against the §1.1 baseline.
+comparable to a clean one, so compare like with like. Recent mid-run serial
+controls vary by `0.5–1.4%` across separate processes; treat a smaller delta as
+unproven unless a repeat run confirms it. Parallel sections also have a join
+tail when one worker straggles, and the process can migrate between Firestorm
+performance and efficiency cores. A step that regresses in every section at once
+is a thermal or scheduling artifact, not evidence of a behavioural change. A
+correctness change is never accepted on timing alone: the smoothed training
+loss and validation loss must be compared against the §1.1 baseline.
 
 Every *untouched* path in a profile is a free control. In Stage 8, `grad_weight`
 (−0.2%), `matmul` (−1.1%), `linear1` (−0.3%), `maximum` (−0.7%), and the

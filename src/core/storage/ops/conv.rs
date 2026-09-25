@@ -609,13 +609,18 @@ fn conv2d_grad_weight_stride1_dilation1<T: Numeric>(
     packed_grad_weight
 }
 
-fn conv2d_grad_input_stride1_dilation1<T: Numeric>(
+/// Fill `grad_input` for `batches` batch entries.
+///
+/// `grad_input` and `packed_grad_output` are the matching slices for exactly
+/// those entries, so the batch index used below is local to the slice. This is
+/// the unit of work for both the serial and the split path.
+fn grad_input_batches<T: Numeric>(
+    grad_input: &mut [T],
     packed_grad_output: &[T],
     packed_weight: &[T],
-    input_numel: usize,
     geometry: Conv2dBackwardGeometry,
-) -> Vec<T> {
-    let mut grad_input = vec![T::ZERO; input_numel];
+    batches: usize,
+) {
     let tiled_channels = geometry.out_channels - geometry.out_channels % OUT_CHANNEL_TILE;
     // Accumulate one register tile of output channels, so the partial sums stay
     // in vector registers across the tap loop rather than being reloaded from a
@@ -644,7 +649,7 @@ fn conv2d_grad_input_stride1_dilation1<T: Numeric>(
         }
     };
 
-    for b in 0..geometry.batch {
+    for b in 0..batches {
         for ic in 0..geometry.in_channels {
             for ih in 0..geometry.height {
                 let padded_ih = ih + geometry.pad_top;
@@ -735,6 +740,52 @@ fn conv2d_grad_input_stride1_dilation1<T: Numeric>(
             }
         }
     }
+}
+
+fn conv2d_grad_input_stride1_dilation1<T: Numeric>(
+    packed_grad_output: &[T],
+    packed_weight: &[T],
+    input_numel: usize,
+    geometry: Conv2dBackwardGeometry,
+) -> Vec<T> {
+    let mut grad_input = vec![T::ZERO; input_numel];
+    let input_plane = geometry.in_channels * geometry.height * geometry.width;
+    let grad_output_plane = geometry.out_h * geometry.out_w * geometry.out_channels;
+    let workers = crate::core::storage::ops::parallel::worker_count(geometry.batch);
+
+    if workers <= 1 {
+        grad_input_batches(
+            &mut grad_input,
+            packed_grad_output,
+            packed_weight,
+            geometry,
+            geometry.batch,
+        );
+        return grad_input;
+    }
+
+    // Batch entries are independent and each writes a disjoint, contiguous
+    // region of the output, so one scoped thread per chunk needs no
+    // synchronisation and no ownership transfer. `chunks_mut` yields the
+    // disjoint output slices; the upstream slices line up because both buffers
+    // are batch-major with a fixed per-batch extent.
+    let per_worker = geometry.batch.div_ceil(workers);
+    std::thread::scope(|scope| {
+        for (grad_input_chunk, grad_output_chunk) in grad_input
+            .chunks_mut(input_plane * per_worker)
+            .zip(packed_grad_output.chunks(grad_output_plane * per_worker))
+        {
+            scope.spawn(move || {
+                grad_input_batches(
+                    grad_input_chunk,
+                    grad_output_chunk,
+                    packed_weight,
+                    geometry,
+                    grad_input_chunk.len() / input_plane,
+                );
+            });
+        }
+    });
 
     grad_input
 }
