@@ -1,4 +1,4 @@
-use crate::core::storage::TensorStorage;
+use crate::core::storage::{TensorStorage, ops::reduce::MaxPool2dMetadata};
 
 /// Read a (possibly strided/view) storage back into a row-major logical
 /// buffer, matching the semantics the kernels are supposed to implement:
@@ -223,7 +223,8 @@ fn max_pool2d_forward_matches_reference() {
     let (out, maxima) = TensorStorage::max_pool2d_with_indices(&a, (2, 2), (1, 1));
     assert_eq!(out.shape, vec![1, 1, 2, 2]);
     assert_eq!(out.buffer.as_slice(), &[4.0, 5.0, 7.0, 8.0]);
-    assert_eq!(maxima, vec![vec![4], vec![5], vec![7], vec![8]]);
+    assert_eq!(maxima.indices, vec![4, 5, 7, 8]);
+    assert_eq!(maxima.offsets, vec![0, 1, 2, 3, 4]);
 
     let (rect, _) = TensorStorage::max_pool2d_with_indices(&a, (3, 2), (1, 1));
     assert_eq!(rect.shape, vec![1, 1, 1, 2]);
@@ -234,7 +235,8 @@ fn max_pool2d_forward_matches_reference() {
 fn max_pool2d_backward_splits_tied_maxima() {
     let input = TensorStorage::from_buffer(vec![1, 1, 2, 2], vec![1.0, 4.0, 4.0, 2.0]);
     let (_, maxima) = TensorStorage::max_pool2d_with_indices(&input, (2, 2), (1, 1));
-    assert_eq!(maxima, vec![vec![1, 2]]);
+    assert_eq!(maxima.indices, vec![1, 2]);
+    assert_eq!(maxima.offsets, vec![0, 2]);
 
     let dy = TensorStorage::from_buffer(vec![1, 1, 1, 1], vec![2.0]);
     let dx = TensorStorage::max_pool2d_backward(&dy, &input.shape, (2, 2), (1, 1), &maxima);
@@ -282,6 +284,9 @@ fn max_pool2d_backward_rejects_mismatched_upstream_shape() {
         &[1, 1, 4, 4],
         (3, 3),
         (1, 1),
-        &vec![Vec::<usize>::new(); 9],
+        &MaxPool2dMetadata {
+            indices: vec![0; 9],
+            offsets: (0..=9).collect(),
+        },
     );
 }

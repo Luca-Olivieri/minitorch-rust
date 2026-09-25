@@ -5,7 +5,7 @@ use crate::core::{
     autograd::grad_fn::*,
     dtype::{Float, Numeric},
     node::TensorNode,
-    storage::TensorStorage,
+    storage::{TensorStorage, ops::reduce::MaxPool2dMetadata},
     tensor::{AbstractTensor, TensorNodeAccess},
 };
 
@@ -133,7 +133,7 @@ impl<T: Float> GradRule<1, T> for AvgPool2dOp {
 pub struct MaxPool2dOp {
     pub kernel: (usize, usize),
     pub stride: (usize, usize),
-    pub max_indices: Rc<Vec<Vec<usize>>>,
+    pub(crate) max_indices: Rc<MaxPool2dMetadata>,
 }
 
 impl<T: Float> GradRule<1, T> for MaxPool2dOp {
@@ -151,7 +151,7 @@ impl<T: Float> GradRule<1, T> for MaxPool2dOp {
                 operands[0].shape(),
                 self.kernel,
                 self.stride,
-                self.max_indices.as_slice(),
+                self.max_indices.as_ref(),
             );
 
             // As with average pooling, the scatter is a graph boundary and is

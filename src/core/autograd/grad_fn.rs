@@ -14,6 +14,7 @@ use crate::core::autograd::ops::shape::{
 use crate::core::{
     GraphTensor,
     dtype::{Dtype, Float, Numeric},
+    storage::ops::reduce::MaxPool2dMetadata,
     tensor::{AbstractTensor, TensorNodeAccess},
 };
 
@@ -125,13 +126,13 @@ pub(crate) enum BackwardOpKind {
         kernel: (usize, usize),
         stride: (usize, usize),
     },
-    /// 2D maximum pooling. The cached groups contain logical input indices for
-    /// every maximum in each output window, so tied maxima can share the
-    /// upstream gradient without rescanning the input.
+    /// 2D maximum pooling. The cached flat metadata contains logical input
+    /// indices for every maximum in each output window, so tied maxima can
+    /// share the upstream gradient without rescanning the input.
     MaxPool2dOp {
         kernel: (usize, usize),
         stride: (usize, usize),
-        max_indices: Rc<Vec<Vec<usize>>>,
+        max_indices: Rc<MaxPool2dMetadata>,
     },
     CopyDOp,
     UnsqueezeOp {

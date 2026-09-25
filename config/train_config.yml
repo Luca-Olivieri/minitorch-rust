@@ -1,7 +1,8 @@
 dataset_root: /Users/lucaolivieri/Documents/CS/datasets/mnist
 batch_size: 64
 base_lr: 0.01
-epochs: 5
+epochs: 1
+# epochs: 5 # default for MNIST
 smoothing_factor: 0.1
 seed: 42
 log_every: 100

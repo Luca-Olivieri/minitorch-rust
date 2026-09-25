@@ -13,8 +13,9 @@ relative to the PyTorch CPU reference. Benchmark results are maintained in
   matrix operations.
 - Shape operations such as `slice_strided` and `reshape` can still materialize
   fresh buffers in other layers and utility paths.
-- `MaxPool2d` stores a `Vec<Vec<usize>>` for every output window. Large batches
-  create hundreds of thousands of small heap allocations.
+- `MaxPool2d` now avoids metadata allocation on its value-only/no-grad path and
+  stores training maxima in flat index/offset buffers. Further gains depend on
+  measuring the pooling kernels separately from convolution.
 - The autograd graph uses `Rc`, boxed type-erased backward sources, and dynamic
   dispatch. This is flexible but adds overhead to differentiable operations.
 - Evaluation now accepts an explicit `no_grad` flag, but it still uses the
@@ -35,6 +36,9 @@ relative to the PyTorch CPU reference. Benchmark results are maintained in
 - [x] Reuse input values across output channels in the forward kernel.
 - [x] Reuse packed output-gradient and weight tensors in the backward kernel.
 - [x] Add a dedicated `Conv2dOp` autograd rule.
+- [x] Add a true value-only `MaxPool2d` path that skips maximum metadata.
+- [x] Replace per-window `Vec<Vec<usize>>` pooling metadata with flat indices and
+      offsets while preserving tied-maximum gradient splitting.
 - [x] Keep bias as a separate operation for now; bias fusion is deferred.
 
 ## Highest-priority optimizations still to check
@@ -81,10 +85,12 @@ The latest user-provided result reduced step-100 backward time to approximately
 
 ### 5. Compact max-pool metadata
 
-- [ ] Replace `Vec<Vec<usize>>` with flat index storage plus offsets/counts, or
-      another compact tied-max representation.
-- [ ] Preserve even gradient splitting for tied maxima.
-- [ ] Benchmark the value-only no-grad path separately from training backward.
+- [x] Replace `Vec<Vec<usize>>` with flat index storage plus offsets.
+- [x] Preserve even gradient splitting for tied maxima.
+- [x] Make the value-only/no-grad path avoid maximum metadata allocation.
+- [ ] Benchmark the value-only path separately from training backward.
+- [ ] Consider a bitmask or backward recomputation only if profiling shows the
+      flat representation is still a meaningful cost.
 
 ### 6. Layer-level profiling and benchmarking
 

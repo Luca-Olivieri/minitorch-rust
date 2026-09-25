@@ -1,6 +1,17 @@
 use crate::core::dtype::{Dtype, Float, Numeric};
 use crate::core::storage::TensorStorage;
 
+/// Flat maximum-index metadata for a 2D max-pooling output.
+///
+/// `indices` stores all logical input indices that attain a window maximum in
+/// output order. `offsets[i]..offsets[i + 1]` is the tied-index group for
+/// output element `i`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MaxPool2dMetadata {
+    pub(crate) indices: Vec<usize>,
+    pub(crate) offsets: Vec<usize>,
+}
+
 impl<T: Numeric> TensorStorage<T> {
     /// Sum over every dimension in `dims`, yielding a tensor with those
     /// dimensions removed. An empty `dims` aggregates over all dimensions.
@@ -207,19 +218,19 @@ impl<T: Float> TensorStorage<T> {
 
     /// 2D maximum pooling over a `[batch, channel, height, width]` input.
     ///
-    /// This is the value-only entry point; it retains the window maxima only long
-    /// enough to build the output. The graph-backed tensor operation uses
-    /// [`Self::max_pool2d_with_indices`] so its backward pass can reuse them.
+    /// This value-only entry point does not build maximum-index metadata. The
+    /// graph-backed tensor operation uses [`Self::max_pool2d_with_indices`] when
+    /// its backward pass needs tied-maximum locations.
     pub fn max_pool2d(
         a: &TensorStorage<T>,
         kernel: (usize, usize),
         stride: (usize, usize),
     ) -> TensorStorage<T> {
-        Self::max_pool2d_with_indices(a, kernel, stride).0
+        Self::max_pool2d_impl(a, kernel, stride, false).0
     }
 
-    /// 2D maximum pooling plus the logical input indices of every maximum in
-    /// each output window.
+    /// 2D maximum pooling plus flat metadata for every maximum in each output
+    /// window.
     ///
     /// Indices are flat indices in the input's logical row-major shape, not
     /// physical buffer offsets. This lets the cached maxima work for strided
@@ -228,7 +239,16 @@ impl<T: Float> TensorStorage<T> {
         a: &TensorStorage<T>,
         kernel: (usize, usize),
         stride: (usize, usize),
-    ) -> (TensorStorage<T>, Vec<Vec<usize>>) {
+    ) -> (TensorStorage<T>, MaxPool2dMetadata) {
+        Self::max_pool2d_impl(a, kernel, stride, true)
+    }
+
+    fn max_pool2d_impl(
+        a: &TensorStorage<T>,
+        kernel: (usize, usize),
+        stride: (usize, usize),
+        collect_indices: bool,
+    ) -> (TensorStorage<T>, MaxPool2dMetadata) {
         if a.shape.len() != 4 {
             panic!(
                 "max_pool2d expects a [batch, channel, height, width] input, got shape {:?}.",
@@ -256,7 +276,15 @@ impl<T: Float> TensorStorage<T> {
         let out_w = (w - kw) / sw + 1;
         let out_numel = b * c * out_h * out_w;
         let mut out_buf = Vec::with_capacity(out_numel);
-        let mut all_maxima = Vec::with_capacity(out_numel);
+        let mut metadata = MaxPool2dMetadata {
+            indices: Vec::new(),
+            offsets: Vec::new(),
+        };
+        if collect_indices {
+            metadata.indices.reserve(out_numel);
+            metadata.offsets.reserve(out_numel + 1);
+            metadata.offsets.push(0);
+        }
         let (s0, s1, s2, s3) = (a.strides[0], a.strides[1], a.strides[2], a.strides[3]);
 
         for batch in 0..b {
@@ -267,9 +295,12 @@ impl<T: Float> TensorStorage<T> {
                     let h_base = plane + oh * sh * s2;
                     for ow in 0..out_w {
                         let w_base = h_base + ow * sw * s3;
-                        let first_index = ((batch * c + chan) * h + oh * sh) * w + ow * sw;
+                        let window_start = ((batch * c + chan) * h + oh * sh) * w + ow * sw;
                         let mut max_value = a.buffer[w_base];
-                        let mut window_maxima = vec![first_index];
+                        let group_start = metadata.indices.len();
+                        if collect_indices {
+                            metadata.indices.push(window_start);
+                        }
 
                         for i in 0..kh {
                             let row = w_base + i * s2;
@@ -279,22 +310,23 @@ impl<T: Float> TensorStorage<T> {
                                 }
 
                                 let value = a.buffer[row + j * s3];
+                                let input_index = window_start + i * w + j;
                                 if value > max_value {
                                     max_value = value;
-                                    window_maxima.clear();
-                                    window_maxima.push(
-                                        ((batch * c + chan) * h + oh * sh + i) * w + ow * sw + j,
-                                    );
-                                } else if value == max_value {
-                                    window_maxima.push(
-                                        ((batch * c + chan) * h + oh * sh + i) * w + ow * sw + j,
-                                    );
+                                    if collect_indices {
+                                        metadata.indices.truncate(group_start);
+                                        metadata.indices.push(input_index);
+                                    }
+                                } else if value == max_value && collect_indices {
+                                    metadata.indices.push(input_index);
                                 }
                             }
                         }
 
                         out_buf.push(max_value);
-                        all_maxima.push(window_maxima);
+                        if collect_indices {
+                            metadata.offsets.push(metadata.indices.len());
+                        }
                     }
                 }
             }
@@ -302,7 +334,7 @@ impl<T: Float> TensorStorage<T> {
 
         (
             TensorStorage::from_buffer(vec![b, c, out_h, out_w], out_buf),
-            all_maxima,
+            metadata,
         )
     }
 
@@ -316,7 +348,7 @@ impl<T: Float> TensorStorage<T> {
         input_shape: &[usize],
         kernel: (usize, usize),
         stride: (usize, usize),
-        max_indices: &[Vec<usize>],
+        max_indices: &MaxPool2dMetadata,
     ) -> TensorStorage<T> {
         if input_shape.len() != 4 {
             panic!(
@@ -348,21 +380,34 @@ impl<T: Float> TensorStorage<T> {
                 dy.shape, expected_shape
             );
         }
-        if max_indices.len() != dy.numel {
+        let expected_offsets = dy.numel + 1;
+        if max_indices.offsets.len() != expected_offsets {
             panic!(
-                "max_pool2d backward expected one maximum-index group per output element, got {} for {} outputs.",
-                max_indices.len(),
+                "max_pool2d backward expected {} maximum-index offset boundaries, got {} for {} outputs.",
+                expected_offsets,
+                max_indices.offsets.len(),
                 dy.numel
             );
         }
+        if max_indices.offsets.first().copied() != Some(0)
+            || max_indices.offsets.last().copied() != Some(max_indices.indices.len())
+            || max_indices
+                .offsets
+                .windows(2)
+                .any(|bounds| bounds[0] > bounds[1])
+        {
+            panic!("max_pool2d backward received invalid maximum-index offsets.");
+        }
 
         let mut out_buf = vec![T::ZERO; input_shape.iter().product()];
-        for (window_maxima, dy_index) in max_indices.iter().zip(dy.strided_indices()) {
-            if window_maxima.is_empty() {
+        for (dy_index, bounds) in dy.strided_indices().zip(max_indices.offsets.windows(2)) {
+            let start = bounds[0];
+            let end = bounds[1];
+            if start == end {
                 panic!("max_pool2d backward encountered an empty maximum-index group.");
             }
-            let share = dy.buffer[dy_index] * T::from_f64(1.0 / window_maxima.len() as f64);
-            for &input_index in window_maxima {
+            let share = dy.buffer[dy_index] * T::from_f64(1.0 / (end - start) as f64);
+            for &input_index in &max_indices.indices[start..end] {
                 if input_index >= out_buf.len() {
                     panic!(
                         "max_pool2d backward encountered out-of-range cached input index {input_index}."
