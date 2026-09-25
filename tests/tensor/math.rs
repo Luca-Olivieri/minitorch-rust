@@ -165,6 +165,83 @@ fn matmul_forward_and_backward() {
     assert_values(d2a_db, &[2.0; 12]);
 }
 
+/// Build a 2D tensor from a row-major flat buffer.
+fn rows(flat: &[f64], rows: usize) -> Vec<Vec<f64>> {
+    let cols = flat.len() / rows;
+    (0..rows)
+        .map(|i| flat[i * cols..(i + 1) * cols].to_vec())
+        .collect()
+}
+
+/// Independent [m,k] x [k,n] product, used to pin the kernel's tiling paths to
+/// a straightforward triple loop.
+fn reference_matmul(a: &[f64], m: usize, k: usize, b: &[f64], n: usize) -> Vec<f64> {
+    let mut out = vec![0.0; m * n];
+    for i in 0..m {
+        for kk in 0..k {
+            for j in 0..n {
+                out[i * n + j] += a[i * k + kk] * b[kk * n + j];
+            }
+        }
+    }
+    out
+}
+
+/// `n = 10` against a tile width of 8: the tiled body must run once and the
+/// remainder loop must pick up the last two columns.
+#[test]
+fn matmul_row_tiled_covers_tile_body_and_tail() {
+    let (m, k, n) = (3usize, 5usize, 10usize);
+    let a_flat: Vec<f64> = (0..m * k).map(|i| (i % 7) as f64 * 0.5 - 1.0).collect();
+    let b_flat: Vec<f64> = (0..k * n).map(|i| (i % 5) as f64 * 0.25).collect();
+
+    let a = GraphTensor::wrap(rows(&a_flat, m), true);
+    let b = GraphTensor::wrap(rows(&b_flat, k), true);
+    let x = GraphTensor::matmul(&a, &b);
+
+    assert_shape(&x, &[m, n]);
+    assert_values(&x, &reference_matmul(&a_flat, m, k, &b_flat, n));
+
+    // Backward drives `a.grad = x.grad @ b^T` (unit-stride outer axis) and
+    // `b.grad = a^T @ x.grad` (unit-stride inner axis). `x.grad` is all ones,
+    // so a.grad collapses to the column sums of `b` and b.grad to the row
+    // sums of `a`.
+    let grads = x.backward(true);
+    let a_grad: Vec<f64> = (0..m * k)
+        .map(|f| {
+            let kk = f % k;
+            (0..n).map(|j| b_flat[kk * n + j]).sum()
+        })
+        .collect();
+    let b_grad: Vec<f64> = (0..k * n)
+        .map(|f| {
+            let kk = f / n;
+            (0..m).map(|i| a_flat[i * k + kk]).sum()
+        })
+        .collect();
+    assert_values(grads.get(&a).unwrap(), &a_grad);
+    assert_values(grads.get(&b).unwrap(), &b_grad);
+}
+
+/// A transposed operand leaves the *outer* axis unit-stride, which is the
+/// layout the dot-product path exists for.
+#[test]
+fn matmul_transposed_operand_uses_contiguous_k() {
+    let (m, k, n) = (3usize, 5usize, 10usize);
+    let a_flat: Vec<f64> = (0..m * k).map(|i| (i % 4) as f64 * 0.75).collect();
+    // Stored [n, k]; the kernel receives its transpose, i.e. [k, n] with
+    // strides [1, k].
+    let bt_flat: Vec<f64> = (0..n * k).map(|i| (i % 6) as f64 * 0.5 - 1.0).collect();
+    let b_kmn: Vec<f64> = (0..k * n).map(|f| bt_flat[(f % n) * k + f / n]).collect();
+
+    let a = GraphTensor::wrap(rows(&a_flat, m), true);
+    let b = GraphTensor::wrap(rows(&bt_flat, n), true).transpose(0, 1);
+    let x = GraphTensor::matmul(&a, &b);
+
+    assert_shape(&x, &[m, n]);
+    assert_values(&x, &reference_matmul(&a_flat, m, k, &b_kmn, n));
+}
+
 #[test]
 fn abs_forward_and_backward() {
     let a = GraphTensor::<f64>::wrap(vec![-2.0, 3.0, 0.0], true);
