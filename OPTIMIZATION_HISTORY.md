@@ -1134,6 +1134,103 @@ Median over the nine full-batch checkpoints, steps 100–900. Rows marked
   Stage 9 onward; the reference-comparison tests in `tests/nn/conv2d.rs` carry
   that load instead.
 
+## 10. `max_pool2d_backward` single-maximum fast path — no measurable effect
+
+**Source label:** `max_pool2d_backward single-maximum fast path`
+**Branch:** `feature/weird-optimizations*`
+**Command:** `MINITORCH_PROFILE_LAYERS=true make run-release`
+**Configuration:** `epochs: 1`
+**Status:** measured through first-epoch validation
+
+The `maximum` kernel had never been targeted. The hypothesis was that it was
+bound by a floating-point division executed once per output window:
+`1.0 / (end - start) as f64`, where `end - start` is the number of positions
+that tied for the window maximum. For non-overlapping windows the common case
+is a unique maximum, where that divisor is `1.0` and the division is
+unnecessary. A second, smaller cost was a pair of bounds checks per scattered
+element, from a manual `if input_index >= out_buf.len()` followed by a
+bounds-checked index.
+
+The change adds a fast path for `end - start == 1` that skips both the division
+and the scatter loop, and routes every scatter through `get_mut` so the range
+check happens once. It is bit-identical: `grad * 1.0 == grad` for every finite
+value, and the tied-maximum path is unchanged.
+
+Both branches were mutation-tested. Doubling the fast-path share, dropping the
+fast-path scatter, and removing the even split on the tied path are each caught
+by `tests/nn/maxpool2d.rs`.
+
+| Metric | Value |
+|---|---:|
+| Dataset setup | 39.342583 ms |
+| Dataloader setup | 0.482667 ms |
+| Model setup | 3.395125 ms |
+| Training samples | 60,000 |
+| Test samples | 10,000 |
+| Training batches | 938 |
+| Validation batches | 157 |
+| Initial loss | 2.3064304231216664 |
+| Initial evaluation | 10.457898792 s |
+| Training time | 233.695550208 s |
+| Smoothed training loss | 0.33636283742747686 |
+| Validation loss | 0.26916314672841835 |
+| Validation time | 10.475820292 s |
+
+### Stage 9 comparison
+
+| Metric | Stage 9 | Stage 10 | Difference |
+|---|---:|---:|---:|
+| Initial evaluation | 10.406701042 s | 10.457898792 s | +0.051 s (+0.5%) |
+| Epoch 1 training | 229.711056 s | 233.695550208 s | +3.98 s (+1.7%) |
+| Validation time | 10.493345833 s | 10.475820292 s | −0.017 s (−0.2%) |
+
+### Operation-level comparison
+
+| Operation | Stage 9 | Stage 10 | Difference |
+|---|---:|---:|---:|
+| `maximum` | 20.232625 ms | 20.843750 ms | **+3.0%** |
+| `conv2d` total | 111.404000 ms | 112.482416 ms | +1.0% *(control)* |
+| Conv2 `grad_input` | 51.848875 ms | 51.930958 ms | +0.2% *(control)* |
+| Conv2 `grad_weight` | 45.391417 ms | 45.490042 ms | +0.2% *(control)* |
+| Conv2 forward | 41.658250 ms | 41.909791 ms | +0.6% *(control)* |
+| `matmul` | 24.371083 ms | 24.265792 ms | −0.4% *(control)* |
+| `linear1` | 3.568791 ms | 3.580042 ms | +0.3% *(control)* |
+| `max_pool2d` | 4.143250 ms | 4.206375 ms | +1.5% *(control)* |
+| `add` | 2.549291 ms | 2.562792 ms | +0.5% *(control)* |
+
+### Optimization review
+
+- **Better:** Nothing. The change is bit-identical, which confirms the
+  implementation is correct, and it eliminated the division: the release
+  binary now contains no `fdiv` outside `mnist::main`, where the only remaining
+  one belongs to the loss smoother. The arithmetic the fast path was written to
+  remove is genuinely gone. It bought no time.
+- **Worse:** `maximum` rose `3.0%`, and epoch-1 training rose `1.7%`. However
+  **every control also rose, by `0.2%` to `1.5%`**, which indicates roughly `1%`
+  of general drift in this run — thermal state, or ordinary variation — that
+  cannot be attributed to the change. Netting the control drift out leaves
+  `maximum` somewhere between `+1.5%` and `+3.0%`, which is worse rather than
+  better.
+- **Unchanged:** Smoothed training loss and validation loss are bit-identical to
+  Stage 9, as designed. All convolution sections, `matmul`, and `linear1` are
+  untouched code and sit inside the drift band.
+- **Diagnosis was wrong.** The division was not the bottleneck. `maximum` is
+  almost certainly bound by the scatter itself: each output window writes to
+  input positions chosen by the argmax, so the writes are irregular and land
+  across a `3.2 MiB` output buffer for Conv2. Dividing once per window out of
+  roughly 111 cycles per window is a small fraction of the work, and the
+  out-of-order engine can overlap independent divisions. Fixing this would mean
+  changing the access pattern, not removing arithmetic from it.
+- **Two measurement problems this profile exposed.** First, the two available
+  estimates of the effect disagree by `8.8×`: the medians of the nine logged
+  checkpoints imply `+0.48 ms` per step, or `+0.45 s` over the epoch, while the
+  measured epoch time rose `+3.98 s`. For comparison, the Stage 8 to Stage 9
+  medians and epoch time agreed to within `10%`. So the nine logged checkpoints
+  are not a representative sample of the 929 unlogged ones in this run, and
+  medians of logged steps should not be used to predict epoch time. Second, the
+  control drift itself is now `1%`, which is the same size as most of the
+  individual optimisations still on the list.
+
 ## Observations and next measurements
 
 - The loss values are bit-identical across Stages 0 through 8 and diverge at
@@ -1158,53 +1255,172 @@ Median over the nine full-batch checkpoints, steps 100–900. Rows marked
   convolution kernel still running the pre-Stage-8 shape, and its two residual
   costs are two bounds-check branches and a stack reload of the tile length per
   iteration.
-- `maximum` is stable at `20.232625 ms` across four profiles and has never been
-  targeted. It is the third-largest backward category after Conv2 and matmul,
-  and the largest code path in the model never examined.
+- `maximum` is the one large code path in the model that has resisted
+  optimization. Stage 10 removed a floating-point division from it and gained
+  nothing measurable, which points at the scatter's irregular write pattern
+  rather than at arithmetic. It is the third-largest backward category at
+  `20.8 ms` and is probably not worth further effort without changing its access
+  pattern.
+- **Four bottleneck diagnoses in this project have now been wrong**: the
+  matmul rewrite was sized as an accumulator problem when the real fault was an
+  opaque runtime stride; the two conv tilings were sized from a load-port model
+  that ignored non-memory costs; and the pool fast path was sized around a
+  division that turned out to be a rounding error in the budget. Every change
+  that worked was one where the disassembly was read first and the diagnosis
+  came from the instruction stream, not from a model. Adopt that as the rule:
+  disassemble, then decide, and treat any timing prediction as unverified until
+  the profile confirms it.
+- Medians over the nine logged checkpoints are not a reliable predictor of epoch
+  time: in Stage 10 they implied `+0.45 s` against a measured `+3.98 s`. Use
+  epoch and validation totals for decisions and logged medians only for
+  attribution within a single run.
+- Control drift is now around `1%` per run, which is the same magnitude as most
+  remaining candidate optimisations. Differences below roughly `2%` should not
+  be treated as signal without a repeat run.
 - Conv1's position-tiling regression suggests the tile needs a size guard keyed
   on `in_channels × out_channels`, since a layer with one input channel has
   nine taps and cannot amortise the per-tile setup. This needs a structural
   predicate rather than a bare constant, and it is worth `0.50 ms` per step.
 - Predictions from instruction-count and load-port models have now been wrong
-  three times: Stage 7 matmul delivered `1.7×` against a predicted `3×`, Stage 8
-  conv tiling `1.27×` against `2×`, and Stage 9 `grad_weight` `1.11×` against a
-  predicted `1.2×`–`1.4×`. These models are reliable for ruling a change *out*
-  and for confirming that codegen changed as intended, and unreliable for
-  sizing the wall-clock effect. Treat future estimates as optimistic by roughly
-  a factor of two, and always verify the disassembly rather than the timing.
+  three times, and a fourth bottleneck diagnosis was simply incorrect. These
+  models are reliable for ruling a change *out* and for confirming that codegen
+  changed as intended, and unreliable for sizing the wall-clock effect. Treat
+  future estimates as unverified until a profile confirms them.
+- The single-threaded PyTorch reference completes epoch 1 in `116.426 s` against
+  Rust's `229.711 s`, a `1.97×` gap, and the gap is almost entirely in the
+  backward pass at `2.80×` while forward is `1.59×` and the two forward-only
+  phases are within `1.14×`–`1.17×`. Effort belongs in backward. The reference
+  script's `torch threads: 1` is an explicit setting, not a PyTorch default, and
+  its ordering relative to the first forward pass is unverified — see the PyTorch
+  reference section.
+- Re-running the PyTorch reference at four threads would settle the largest open
+  question in one run: if its backward scales to roughly a third of `59.3 ms`,
+  threading is a known ~3× on this workload and the Rust port should take it
+  next. If it barely improves, the single-thread convolution gap is real and more
+  register or cache blocking in `grad_input` is still the better investment.
+- Loss values are not comparable to the PyTorch reference until the seed,
+  initialisation, and hyperparameters are matched; the initial losses already
+  differ, so the trajectories diverge for that reason alone.
 - Future profiles should record CPU model, commit, dtype, and thread settings
   before making claims that require cross-machine or PyTorch comparisons.
 - Do not extrapolate from individual checkpoints, especially step `938/938`;
   use the measured epoch and validation totals for comparisons.
 
-## Historical PyTorch reference
+## PyTorch reference
 
-The following reference is kept separately from the ten Rust profiles above.
+The reference run below is a **complete single-threaded PyTorch `float64` CPU
+run of the same MNIST workload**, recorded separately from the ten Rust profiles
+because it is a different implementation and a different run, not a variant of
+the Rust code. It replaces an earlier, partial record that held only one
+checkpoint and no epoch totals; the earlier record's per-checkpoint timings
+(`forward 0.052357 s`, `backward 0.063982 s` at step 100) did not come from this
+run and should not be compared with anything below.
 
 | Metric | Value |
 |---|---:|
-| Device | CPU |
+| Device | `cpu` |
 | Dtype | `torch.float64` |
 | Torch threads | 1 |
-| Dataset setup | 0.440 s |
-| Initial evaluation | 9.336 s |
-| Initial loss | 2.314024 |
+| Dataset setup | 0.508 s |
+| Dataloader setup | not reported |
+| Training samples | 60,000 |
+| Test samples | 10,000 |
 | Training batches | 938 |
 | Validation batches | 157 |
+| Initial evaluation | 8.896 s |
+| Initial loss | 2.314024 |
+| **Epoch 1 training time** | **116.426 s** |
+| **Epoch 1 smoothed train loss** | **0.288240** |
+| **Validation loss** | **0.236946** |
+| **Validation time** | **9.213 s** |
 
-### PyTorch step 100
+**On the thread count.** PyTorch's default `torch.get_num_threads()` is the
+number of CPU cores, *not* one, so the `torch threads: 1` above is an explicit
+setting by the reference script rather than a default. It was not set in this
+repository and could not be verified here, because PyTorch is not installed on
+the development machine. Two things should be confirmed before this reference is
+relied on again:
 
-| Operation | Time |
-|---|---:|
-| Forward | 0.052357 s |
-| Loss | 0.000113 s |
-| Backward | 0.063982 s |
-| Optimizer step | 0.000962 s |
-| Smoothed loss | 2.146694 |
+- `torch.set_num_threads(1)` must be called before any eager, JIT, or autograd
+  code runs, per the PyTorch documentation. If it were called after a forward
+  pass had already initialised the OpenMP pool, the effective thread count could
+  exceed 1 and every ratio below would be optimistic for Rust.
+- `torch.get_num_interop_threads()` is not pinned by the printed value. For a
+  sequential training loop it should not engage, but it is unverified.
 
-The displayed PyTorch operation times sum to approximately `0.117414 s` per
-batch. This is a reference measurement, not one of the Rust profiles in
-`prof.txt`.
+Asserting `torch.get_num_threads() == 1` both immediately after the setter and
+again after the first step would settle both. Until that is done, treat the
+per-op ratios as indicative and the epoch totals as the reliable comparison,
+since a leaked thread would inflate the per-op figures far more than a
+157-batch validation pass.
+
+### PyTorch checkpoints
+
+| Step | Forward | Loss | Backward | Step time | Smoothed loss | Grad entries |
+|---:|---:|---:|---:|---:|---:|---:|
+| 100 / 938 | 0.049959 s | 0.000103 s | 0.058772 s | 0.000941 s | 2.146694 | 8 |
+| 200 / 938 | 0.053423 s | 0.000109 s | 0.063430 s | 0.000948 s | 1.255469 | 8 |
+| 300 / 938 | 0.049617 s | 0.000174 s | 0.060420 s | 0.000932 s | 0.672885 | 8 |
+| 400 / 938 | 0.047998 s | 0.000103 s | 0.056277 s | 0.000953 s | 0.516104 | 8 |
+| 500 / 938 | 0.048667 s | 0.000102 s | 0.057258 s | 0.001011 s | 0.491253 | 8 |
+| 600 / 938 | 0.047882 s | 0.000101 s | 0.067166 s | 0.000958 s | 0.395137 | 8 |
+| 700 / 938 | 0.048356 s | 0.000108 s | 0.056516 s | 0.000958 s | 0.370829 | 8 |
+| 800 / 938 | 0.050063 s | 0.000106 s | 0.059264 s | 0.000932 s | 0.371557 | 8 |
+| 900 / 938 | 0.059339 s | 0.000198 s | 0.068877 s | 0.001178 s | 0.335618 | 8 |
+| 938 / 938 | 0.031080 s | 0.000105 s | 0.042166 s | 0.001423 s | 0.288240 | 8 |
+
+### Head-to-head against Stage 9
+
+Both are single-threaded, so this is a like-for-like comparison. Rust figures
+are medians over the nine full-batch checkpoints; PyTorch figures are the same.
+
+| Metric | PyTorch | Rust Stage 9 | Ratio |
+|---|---:|---:|---:|
+| Forward | 49.617 ms | 78.890 ms | **1.59×** |
+| Backward | 59.264 ms | 165.792 ms | **2.80×** |
+| Optimizer step | 0.953 ms | 0.868 ms | **0.91×** |
+| **Per-step total** | **109.937 ms** | **245.550 ms** | **2.23×** |
+| Epoch 1 training | 116.426 s | 229.711 s | **1.97×** |
+| Initial evaluation | 8.896 s | 10.407 s | **1.17×** |
+| Validation | 9.213 s | 10.493 s | **1.14×** |
+
+The shape of this gap matters more than its size:
+
+- **The remaining 2.8× is almost entirely in the backward pass.** Forward is
+  within `1.59×` and the two forward-only phases — initial evaluation and
+  validation — are within `1.17×` and `1.14×`. The optimizer step is marginally
+  *faster* than PyTorch.
+- That is consistent with where the Rust time goes: `conv2d` backward is
+  `111.40 ms` of the `165.79 ms` total, against a PyTorch backward of
+  `59.26 ms` for everything. PyTorch routes convolution backward through
+  oneDNN, whose kernels are register-blocked, cache-blocked, and prefetching;
+  the direct kernels here are hand-tiled but still run one core with a scalar
+  tail in places.
+- Evaluation and validation being close while training is not is a useful
+  signal: the forward path is in reasonable shape, so effort belongs in
+  backward, not in the activation or pooling layers.
+
+### Loss values are not comparable across the two implementations
+
+| Metric | PyTorch | Rust Stage 9 |
+|---|---:|---:|
+| Initial loss | 2.314024 | 2.3064304231216664 |
+| Epoch 1 smoothed train loss | 0.288240 | 0.33636283742747686 |
+| Validation loss | 0.236946 | 0.26916314672841835 |
+
+Both initial losses sit near `ln(10) = 2.302585`, which is what an untrained
+model should give, but they are **not equal**, so the two runs used different
+initial weights and the trajectories are not comparable point by point. The
+curves cross repeatedly — Rust is lower at steps 200, 300, 800, and 900, and
+higher at 400, 500, 600, 700, and at the end — which is what different seeds
+produce, not what a systematically wrong gradient produces.
+
+**No claim is made here that the two implementations agree numerically.** Doing
+so would require matching the seed, the initialisation, and every
+hyperparameter, and none of that has been verified. A loss mismatch at this
+magnitude should be treated as unresolved until the configurations are pinned
+down, and the timings above stand on their own regardless because they are
+comparisons of wall-clock time rather than of results.
 
 ## Result-entry template
 
