@@ -489,44 +489,116 @@ fn conv2d_backward_impl<T: Numeric>(
     }
 }
 
+/// Output positions accumulated per pass by the tiled weight-gradient kernel.
+const POSITION_TILE: usize = 8;
+
+/// The fixed-index `input_values` accesses are deliberate: a compile-time-sized
+/// local array is what the optimizer needs in order to keep the accumulator in
+/// registers across the channel loop, and rewriting the loops as iterators
+/// hides the trip count and reintroduces a memory round-trip.
+#[allow(clippy::needless_range_loop)]
 fn conv2d_grad_weight_stride1_dilation1<T: Numeric>(
     padded_input: &TensorStorage<T>,
     packed_grad_output: &[T],
     geometry: Conv2dBackwardGeometry,
 ) -> Vec<T> {
+    let out_channels = geometry.out_channels;
     let mut packed_grad_weight =
-        vec![
-            T::ZERO;
-            geometry.in_channels * geometry.kernel_h * geometry.kernel_w * geometry.out_channels
-        ];
+        vec![T::ZERO; geometry.in_channels * geometry.kernel_h * geometry.kernel_w * out_channels];
     let padded_input_strides = &padded_input.strides;
     let padded_input_offset = padded_input.offset;
+    let plane = geometry.out_h * geometry.out_w;
+    let tiled_plane = plane - plane % POSITION_TILE;
+    let tiled_channels = out_channels - out_channels % OUT_CHANNEL_TILE;
 
     for b in 0..geometry.batch {
         let input_batch_base = padded_input_offset + b * padded_input_strides[0];
-        for oh in 0..geometry.out_h {
-            for ow in 0..geometry.out_w {
-                let grad_output_base =
-                    ((b * geometry.out_h + oh) * geometry.out_w + ow) * geometry.out_channels;
-                for ic in 0..geometry.in_channels {
-                    let input_channel_base = input_batch_base + ic * padded_input_strides[1];
-                    for kh in 0..geometry.kernel_h {
-                        let input_row = input_channel_base + (oh + kh) * padded_input_strides[2];
-                        for kw in 0..geometry.kernel_w {
-                            let input_value = padded_input.buffer
-                                [input_row + (ow + kw) * padded_input_strides[3]];
-                            let packed_base = ((ic * geometry.kernel_h + kh) * geometry.kernel_w
-                                + kw)
-                                * geometry.out_channels;
-                            let grad_weight_slice = &mut packed_grad_weight
-                                [packed_base..packed_base + geometry.out_channels];
-                            let grad_output_slice = &packed_grad_output
-                                [grad_output_base..grad_output_base + geometry.out_channels];
-                            for (weight_grad, &grad_output_value) in
-                                grad_weight_slice.iter_mut().zip(grad_output_slice.iter())
-                            {
-                                *weight_grad += input_value * grad_output_value;
+        for ic in 0..geometry.in_channels {
+            let input_channel_base = input_batch_base + ic * padded_input_strides[1];
+            for kh in 0..geometry.kernel_h {
+                // Tiling the *position* axis is what makes this kernel possible.
+                // The output-channel accumulator cannot be held in registers
+                // here, because it has to survive the whole position loop; but a
+                // register tile of positions for one channel block can. Tiles
+                // also shorten the packed-gradient reuse distance from the whole
+                // `in_channels * kernel_h * kernel_w * out_channels` buffer to
+                // `kernel_w * out_channels`, keeping it resident in L1.
+                for plane_base in (0..tiled_plane).step_by(POSITION_TILE) {
+                    for kw in 0..geometry.kernel_w {
+                        // One scalar per tiled position, shared by every channel
+                        // block below, so the padded input is read once per tap
+                        // rather than once per tap and channel block. Row and
+                        // column are recomputed per use rather than tabulated:
+                        // holding sixteen `usize` across the channel loop costs
+                        // more registers than the divisions save.
+                        let mut input_values = [T::ZERO; POSITION_TILE];
+                        for p in 0..POSITION_TILE {
+                            let position = plane_base + p;
+                            input_values[p] = padded_input.buffer[input_channel_base
+                                + (position / geometry.out_w + kh) * padded_input_strides[2]
+                                + (position % geometry.out_w + kw) * padded_input_strides[3]];
+                        }
+                        let packed_base =
+                            ((ic * geometry.kernel_h + kh) * geometry.kernel_w + kw) * out_channels;
+
+                        for oc_base in (0..tiled_channels).step_by(OUT_CHANNEL_TILE) {
+                            let mut tile = [T::ZERO; OUT_CHANNEL_TILE];
+                            for p in 0..POSITION_TILE {
+                                let position = plane_base + p;
+                                let grad_output_base = ((b * geometry.out_h
+                                    + position / geometry.out_w)
+                                    * geometry.out_w
+                                    + position % geometry.out_w)
+                                    * out_channels
+                                    + oc_base;
+                                let grad_output_slice = &packed_grad_output
+                                    [grad_output_base..grad_output_base + OUT_CHANNEL_TILE];
+                                for u in 0..OUT_CHANNEL_TILE {
+                                    tile[u] += input_values[p] * grad_output_slice[u];
+                                }
                             }
+                            let grad_weight_slice = &mut packed_grad_weight
+                                [packed_base + oc_base..packed_base + oc_base + OUT_CHANNEL_TILE];
+                            for u in 0..OUT_CHANNEL_TILE {
+                                grad_weight_slice[u] += tile[u];
+                            }
+                        }
+
+                        // Channels left over when `out_channels` is not a
+                        // multiple of the tile width.
+                        for oc in tiled_channels..out_channels {
+                            let mut sum = T::ZERO;
+                            for p in 0..POSITION_TILE {
+                                let position = plane_base + p;
+                                let grad_output_base = ((b * geometry.out_h
+                                    + position / geometry.out_w)
+                                    * geometry.out_w
+                                    + position % geometry.out_w)
+                                    * out_channels
+                                    + oc;
+                                sum += input_values[p] * packed_grad_output[grad_output_base];
+                            }
+                            packed_grad_weight[packed_base + oc] += sum;
+                        }
+                    }
+                }
+
+                // Positions left over when the output plane is not a multiple of
+                // the tile width.
+                for p in tiled_plane..plane {
+                    let oh = p / geometry.out_w;
+                    let ow = p % geometry.out_w;
+                    for kw in 0..geometry.kernel_w {
+                        let input_value = padded_input.buffer[input_channel_base
+                            + (oh + kh) * padded_input_strides[2]
+                            + (ow + kw) * padded_input_strides[3]];
+                        let packed_base =
+                            ((ic * geometry.kernel_h + kh) * geometry.kernel_w + kw) * out_channels;
+                        let grad_output_base =
+                            ((b * geometry.out_h + oh) * geometry.out_w + ow) * out_channels;
+                        for oc in 0..out_channels {
+                            packed_grad_weight[packed_base + oc] +=
+                                input_value * packed_grad_output[grad_output_base + oc];
                         }
                     }
                 }

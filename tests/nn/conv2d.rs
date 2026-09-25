@@ -538,6 +538,26 @@ fn conv2d_output_channel_tiling_covers_tile_and_remainder() {
     }
 }
 
+/// The weight-gradient kernel also tiles the output *position* axis in blocks of
+/// eight, accumulating each tile into the shared packed gradient. These output
+/// sizes give one tile plus a remainder (9), two whole tiles (16), and three
+/// tiles plus a remainder (25), crossed with channel counts that are an exact
+/// multiple of the tile width and one that is not.
+#[test]
+fn conv2d_position_tiling_covers_multiple_tiles_and_remainders() {
+    for (input_shape, out_channels) in [
+        ([2usize, 2usize, 5usize, 5usize], 8usize), //  9 positions = 1 tile + 1
+        ([2, 2, 6, 6], 8),                          // 16 positions = 2 tiles
+        ([2, 2, 6, 6], 10),                         // 16 positions, 2 channels over
+        ([1, 3, 7, 7], 16),                         // 25 positions = 3 tiles + 1
+        ([1, 3, 7, 7], 9),                          // 25 positions, 1 channel over
+    ] {
+        let input = distinct_input(&input_shape);
+        let weight = distinct_weight(input_shape[1], out_channels, 3, 3);
+        assert_conv_matches_reference(&input, &weight);
+    }
+}
+
 /// Same padding with more than eight output channels must agree exactly with
 /// explicitly zero-padding the input and running the valid-padding path.
 #[test]
