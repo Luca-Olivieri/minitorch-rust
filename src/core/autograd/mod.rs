@@ -2,12 +2,22 @@ pub(crate) mod erased;
 pub mod grad_fn;
 pub mod ops;
 
+use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use crate::core::autograd::erased::{ErasedTensor, FloatRepr, GradValue};
-use crate::core::autograd::grad_fn::{ErasedGradFn, materialize_grad_fn};
+use crate::core::autograd::grad_fn::{Conv2dProfile, ErasedGradFn, materialize_grad_fn};
 use crate::core::{GraphTensor, dtype::Float};
+
+/// Time spent executing one backward operation during a profiled pass.
+#[derive(Debug, Clone)]
+pub struct BackwardTiming {
+    pub operation: &'static str,
+    pub duration: Duration,
+    pub details: Vec<(&'static str, Duration)>,
+}
 
 /// Dtype-erased gradient map, keyed by node identity.
 ///
@@ -50,6 +60,11 @@ impl<T: FloatRepr> GraphTensor<T> {
         self.compile_backward().run(retain_graph)
     }
 
+    /// Run backward and return per-operation timings in execution order.
+    pub fn backward_profiled(&self, retain_graph: bool) -> (GradMap, Vec<BackwardTiming>) {
+        BackwardPlan::build(self, true).run_profiled(retain_graph)
+    }
+
     /// Precompile the backward schedule for the graph reachable from `self`.
     ///
     /// The returned plan owns `Rc` handles to every node of the forward graph, so it
@@ -57,7 +72,7 @@ impl<T: FloatRepr> GraphTensor<T> {
     /// times (e.g. with different `retain_graph` flags), reusing the compiled
     /// topological schedule and the gradient/scratch buffers across runs.
     pub fn compile_backward(&self) -> BackwardPlan {
-        BackwardPlan::build(self)
+        BackwardPlan::build(self, false)
     }
 }
 
@@ -85,12 +100,14 @@ pub struct BackwardPlan {
     base_in_degree: Vec<usize>,
     grads: Vec<Option<GradValue>>,
     scratch: Vec<Option<GradValue>>,
+    conv2d_profile: Option<Conv2dProfile>,
 }
 
 impl BackwardPlan {
     /// Walk the forward graph once, assigning each reachable, requires-grad node a
     /// dense index and recording its operand indices, leaf-ness, and in-degree.
-    fn build<T: FloatRepr>(seed: &GraphTensor<T>) -> BackwardPlan {
+    fn build<T: FloatRepr>(seed: &GraphTensor<T>, profile: bool) -> BackwardPlan {
+        let conv2d_profile = profile.then(|| Rc::new(RefCell::new(Vec::new())));
         let mut nodes: Vec<ErasedTensor> = Vec::new();
         let mut index_of: HashMap<*const (), usize> = HashMap::new();
         let mut operands: Vec<Vec<usize>> = Vec::new();
@@ -116,7 +133,7 @@ impl BackwardPlan {
             // Snapshot the erased operands so `nodes` can grow while iterating,
             // then freeze this node's deferred rule into the plan.
             let op_erased = nodes[u].erased_operands();
-            grad_fns[u] = materialize_grad_fn(&nodes[u]);
+            grad_fns[u] = materialize_grad_fn(&nodes[u], conv2d_profile.clone());
 
             for op in op_erased {
                 let ptr = op.ptr();
@@ -155,14 +172,36 @@ impl BackwardPlan {
             base_in_degree,
             grads: (0..node_count).map(|_| None).collect(),
             scratch: Vec::new(),
+            conv2d_profile,
         }
     }
 
     /// Execute the compiled backward pass from the seed this plan was built for.
     pub fn run(&mut self, retain_graph: bool) -> GradMap {
         self.execute(retain_graph);
+        self.materialize_grad_map(retain_graph)
+    }
 
-        // Materialize the output map, moving gradients out of the reusable buffer.
+    /// Execute the compiled backward pass and collect per-operation timings.
+    pub fn run_profiled(&mut self, retain_graph: bool) -> (GradMap, Vec<BackwardTiming>) {
+        let mut timings = self.execute_profiled(retain_graph);
+        if let Some(profile) = &self.conv2d_profile {
+            let details = profile.borrow_mut().drain(..).collect::<Vec<_>>();
+            let mut conv_index = 0;
+            for timing in &mut timings {
+                if timing.operation == "conv2d" {
+                    if let Some(details) = details.get(conv_index) {
+                        timing.details = details.clone();
+                    }
+                    conv_index += 1;
+                }
+            }
+        }
+        (self.materialize_grad_map(retain_graph), timings)
+    }
+
+    /// Materialize the output map, moving gradients out of the reusable buffer.
+    fn materialize_grad_map(&mut self, retain_graph: bool) -> GradMap {
         // First-order path: keep only leaf tensors; higher-order callers keep every
         // gradient so they can fetch intermediates.
         let mut slots = HashMap::new();
@@ -177,8 +216,20 @@ impl BackwardPlan {
         GradMap { slots }
     }
 
-    /// Walk the scheduled graph, filling `self.grads` with erased gradient slots.
+    /// Walk the scheduled graph without collecting operation timings.
     fn execute(&mut self, retain_graph: bool) {
+        self.execute_inner(retain_graph, None);
+    }
+
+    /// Walk the scheduled graph and collect operation timings.
+    fn execute_profiled(&mut self, retain_graph: bool) -> Vec<BackwardTiming> {
+        let mut timings = Vec::new();
+        self.execute_inner(retain_graph, Some(&mut timings));
+        timings
+    }
+
+    /// Walk the scheduled graph, filling `self.grads` with erased gradient slots.
+    fn execute_inner(&mut self, retain_graph: bool, mut timings: Option<&mut Vec<BackwardTiming>>) {
         assert!(
             self.nodes[self.seed_idx].requires_grad(),
             "Cannot run backward() on a tensor with requires_grad=False. Likely, the graph has no leaf nodes requiring gradients."
@@ -207,9 +258,20 @@ impl BackwardPlan {
                 continue;
             };
 
+            let timing_start = timings.as_ref().map(|_| Instant::now());
             {
                 let in_grad = self.grads[u].as_ref().unwrap();
                 grad_fn.compute(in_grad, retain_graph, &mut self.scratch);
+            }
+            if let Some(start) = timing_start {
+                timings
+                    .as_deref_mut()
+                    .expect("profiled backward timing collector disappeared")
+                    .push(BackwardTiming {
+                        operation: grad_fn.profile_name(),
+                        duration: start.elapsed(),
+                        details: Vec::new(),
+                    });
             }
 
             for (&v, op_grad_opt) in self.operands[u].iter().zip(self.scratch.iter()) {

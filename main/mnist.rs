@@ -1,7 +1,9 @@
+use std::collections::BTreeMap;
 use std::fs;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use minitorch_rust::core::GraphTensor;
+use minitorch_rust::core::autograd::BackwardTiming;
 use minitorch_rust::core::nn::activate::ReLU;
 use minitorch_rust::core::nn::compute::{Conv2d, Conv2dPadding, Linear, MaxPool2d};
 use minitorch_rust::core::nn::dropout::Dropout;
@@ -75,6 +77,62 @@ macro_rules! timeit {
     };
 }
 
+fn duration_ms(duration: Duration) -> f64 {
+    duration.as_secs_f64() * 1_000.0
+}
+
+fn print_layer_timings(epoch: usize, step: usize, timings: &[(&'static str, Duration)]) {
+    println!("[PROFILE] Forward timings | epoch {epoch} | step {step}");
+    let name_width = timings
+        .iter()
+        .map(|(name, _)| name.len())
+        .max()
+        .unwrap_or(0);
+    for (name, duration) in timings {
+        println!("  {name:<name_width$}  {:>12.6} ms", duration_ms(*duration));
+    }
+}
+
+fn print_backward_timings(epoch: usize, step: usize, timings: &[BackwardTiming]) {
+    let mut totals: BTreeMap<&'static str, (usize, Duration)> = BTreeMap::new();
+    for timing in timings {
+        let entry = totals
+            .entry(timing.operation)
+            .or_insert((0, Duration::ZERO));
+        entry.0 += 1;
+        entry.1 += timing.duration;
+    }
+
+    println!("[PROFILE] Backward operation totals | epoch {epoch} | step {step}");
+    println!("  {:<20}  {:>7}  {:>14}", "operation", "count", "total");
+    for (operation, (count, total)) in totals {
+        println!(
+            "  {operation:<20}  {count:>7}  {:>12.6} ms",
+            duration_ms(total)
+        );
+    }
+
+    let conv_timings: Vec<_> = timings
+        .iter()
+        .filter(|timing| timing.operation == "conv2d")
+        .collect();
+    if conv_timings.is_empty() {
+        return;
+    }
+
+    println!("  convolution details (reverse graph order)");
+    for (index, timing) in conv_timings.iter().enumerate() {
+        println!(
+            "    conv2d_backward[{}]  {:>12.6} ms",
+            index + 1,
+            duration_ms(timing.duration)
+        );
+        for (section, duration) in &timing.details {
+            println!("      {section:<20}  {:>12.6} ms", duration_ms(*duration));
+        }
+    }
+}
+
 module! {
     SmallCNN {
         modules {
@@ -132,6 +190,25 @@ impl SmallCNN {
         }
     }
 
+    pub fn forward_with_timings(
+        &self,
+        input: &GraphTensor,
+        no_grad: bool,
+    ) -> (GraphTensor, Vec<(&'static str, Duration)>) {
+        const FEATURE_LAYERS: [&str; 6] = ["conv1", "relu1", "pool1", "conv2", "relu2", "pool2"];
+        const CLASSIFIER_LAYERS: [&str; 5] = ["flatten", "dropout", "linear1", "relu3", "linear2"];
+
+        let (features, feature_timings) = self.features.forward_with_timings(input, no_grad);
+        let (output, classifier_timings) = self.classifier.forward_with_timings(&features, no_grad);
+        assert_eq!(feature_timings.len(), FEATURE_LAYERS.len());
+        assert_eq!(classifier_timings.len(), CLASSIFIER_LAYERS.len());
+
+        let mut timings = Vec::with_capacity(FEATURE_LAYERS.len() + CLASSIFIER_LAYERS.len());
+        timings.extend(FEATURE_LAYERS.iter().copied().zip(feature_timings));
+        timings.extend(CLASSIFIER_LAYERS.iter().copied().zip(classifier_timings));
+        (output, timings)
+    }
+
     pub fn evaluate(&self, loader: &MnistDataLoader, criterion: &dyn Loss) -> GraphTensor {
         let mut total_loss = 0.0;
         let mut sample_count = 0usize;
@@ -160,6 +237,10 @@ impl Forward1 for SmallCNN {
 
 fn main() {
     let config = TrainConfig::load();
+    let profile_layers = std::env::var_os("MINITORCH_PROFILE_LAYERS").is_some();
+    if profile_layers {
+        println!("Layer profiling enabled for logged training steps.");
+    }
 
     timeit!("Datasets set up (took {elapsed})";
         let train_dataset = MNISTDataset::new(
@@ -230,9 +311,21 @@ fn main() {
             let step_width = num_batches.to_string().len();
             let (inputs, targets) = train_loader.get_batch(step);
 
+            let profile_this_step =
+                profile_layers && (step_number % log_every == 0 || step_number == num_batches);
             let start = Instant::now();
-            let logits = model.forward(&inputs, false);
+            let mut layer_timings = None;
+            let logits = if profile_this_step {
+                let (output, timings) = model.forward_with_timings(&inputs, false);
+                layer_timings = Some(timings);
+                output
+            } else {
+                model.forward(&inputs, false)
+            };
             let forward_time = start.elapsed();
+            if let Some(timings) = layer_timings.as_ref() {
+                print_layer_timings(epoch_number, step_number, timings);
+            }
 
             let targets_oh = targets.one_hot(logits.shape()[1]);
 
@@ -241,8 +334,18 @@ fn main() {
             let loss_time = start.elapsed();
 
             let start = Instant::now();
-            let grads = loss.backward(false);
+            let mut backward_timings: Option<Vec<BackwardTiming>> = None;
+            let grads = if profile_this_step {
+                let (grads, timings) = loss.backward_profiled(false);
+                backward_timings = Some(timings);
+                grads
+            } else {
+                loss.backward(false)
+            };
             let backward_time = start.elapsed();
+            if let Some(timings) = backward_timings.as_ref() {
+                print_backward_timings(epoch_number, step_number, timings);
+            }
 
             let start = Instant::now();
             optimizer.step(&mut model, &grads);

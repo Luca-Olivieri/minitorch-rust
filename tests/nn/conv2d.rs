@@ -164,6 +164,34 @@ fn conv2d_free_function_forward_matches_reference() {
 }
 
 #[test]
+fn conv2d_backward_profiling_reports_split_sections() {
+    let input = test_input();
+    let weight = test_weight();
+    let output = conv2d(&input, &weight);
+    let loss = output.sum(&[], false);
+    let (grads, timings) = loss.backward_profiled(false);
+
+    assert!(grads.get(&input).is_some());
+    let conv_timing = timings
+        .iter()
+        .find(|timing| timing.operation == "conv2d")
+        .expect("profiled convolution timing missing");
+    assert_eq!(conv_timing.details.len(), 6);
+    assert!(
+        conv_timing
+            .details
+            .iter()
+            .any(|(name, _)| *name == "grad_input")
+    );
+    assert!(
+        conv_timing
+            .details
+            .iter()
+            .any(|(name, _)| *name == "grad_weight")
+    );
+}
+
+#[test]
 fn conv2d_free_function_is_generic_over_dtype() {
     let input = GraphTensor::<f32>::wrap(vec![vec![vec![vec![1.0f32, 2.0, 3.0]]]], false); // [1, 1, 1, 3]
     let weight = GraphTensor::<f32>::wrap(vec![vec![vec![vec![1.0f32, 0.0]]]], false); // [1, 1, 1, 2]
@@ -266,6 +294,38 @@ fn conv2d_same_padding_preserves_spatial_dimensions() {
 
     let output = conv.forward(&input, false);
     assert_eq!(output.shape(), &[1, 1, 5, 5]);
+}
+
+#[test]
+fn conv2d_square_five_by_five_matches_reference() {
+    let input = GraphTensor::new(vec![1, 1, 5, 5], 1.0, true);
+    let mut conv = Conv2d::new_with_options(
+        1,
+        1,
+        5,
+        1,
+        Conv2dPadding::Valid,
+        1,
+        false,
+        StdRng::seed_from_u64(46),
+    );
+    conv.weight = GraphTensor::new(vec![1, 1, 5, 5], 0.5, true);
+
+    let output = conv.forward(&input, false);
+    assert_eq!(output.shape(), &[1, 1, 1, 1]);
+    approx(*output.at(&[0, 0, 0, 0]), 12.5);
+
+    let grads = output.sum(&[], false).backward(true);
+    let dx = grads.get(&input).unwrap();
+    let dw = grads.get(&conv.weight).unwrap();
+    for flat in 0..dx.numel() {
+        let index = unflatten(dx.shape(), flat);
+        approx(*dx.at(&index), 0.5);
+    }
+    for flat in 0..dw.numel() {
+        let index = unflatten(dw.shape(), flat);
+        approx(*dw.at(&index), 1.0);
+    }
 }
 
 #[test]

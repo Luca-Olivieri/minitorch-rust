@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use crate::core::{
     GraphTensor,
     nn::module::{Forward1, Layer, Module},
@@ -91,5 +93,39 @@ impl Forward1 for DynSequential {
             output = layer.forward(&output, no_grad);
         }
         output
+    }
+}
+
+impl DynSequential {
+    /// Run the sequence and return the elapsed time for each child layer.
+    ///
+    /// This is intended for opt-in profiling. The normal [`Forward1::forward`]
+    /// path remains timer-free.
+    pub fn forward_with_timings(
+        &self,
+        input: &GraphTensor,
+        no_grad: bool,
+    ) -> (GraphTensor, Vec<Duration>) {
+        let Some(first) = self.layers.first() else {
+            let output = if no_grad {
+                input.detach(false)
+            } else {
+                input.copy_s()
+            };
+            return (output, Vec::new());
+        };
+
+        let mut timings = Vec::with_capacity(self.layers.len());
+        let start = Instant::now();
+        let mut output = first.forward(input, no_grad);
+        timings.push(start.elapsed());
+
+        for layer in self.layers.iter().skip(1) {
+            let start = Instant::now();
+            output = layer.forward(&output, no_grad);
+            timings.push(start.elapsed());
+        }
+
+        (output, timings)
     }
 }

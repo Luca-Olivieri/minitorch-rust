@@ -1,5 +1,7 @@
+use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
+use std::time::Duration;
 
 use crate::core::autograd::erased::{ErasedHandle, ErasedTensor, FloatKind, FloatRepr, GradValue};
 use crate::core::autograd::ops::conv::Conv2dOp;
@@ -17,6 +19,8 @@ use crate::core::{
     storage::ops::reduce::MaxPool2dMetadata,
     tensor::{AbstractTensor, TensorNodeAccess},
 };
+
+pub(crate) type Conv2dProfile = Rc<RefCell<Vec<Vec<(&'static str, Duration)>>>>;
 
 /// Deferred gradient source for a forward node.
 ///
@@ -174,6 +178,39 @@ pub(crate) enum BackwardOpKind {
     CastOp,
 }
 
+fn backward_op_name(op: &BackwardOpKind) -> &'static str {
+    match op {
+        BackwardOpKind::AddOp => "add",
+        BackwardOpKind::MulOp => "mul",
+        BackwardOpKind::SubOp => "sub",
+        BackwardOpKind::DivOp => "div",
+        BackwardOpKind::NegOp => "neg",
+        BackwardOpKind::AbsOp => "abs",
+        BackwardOpKind::LnOp => "ln",
+        BackwardOpKind::ExpOp => "exp",
+        BackwardOpKind::SqrtOp => "sqrt",
+        BackwardOpKind::PowOp => "pow",
+        BackwardOpKind::SumOp { .. } => "sum",
+        BackwardOpKind::MaxOp { .. } => "max",
+        BackwardOpKind::MatmulOp => "matmul",
+        BackwardOpKind::Conv2dOp { .. } => "conv2d",
+        BackwardOpKind::MaximumOp => "maximum",
+        BackwardOpKind::AvgPool2dOp { .. } => "avg_pool2d",
+        BackwardOpKind::MaxPool2dOp { .. } => "max_pool2d",
+        BackwardOpKind::CopyDOp => "copy",
+        BackwardOpKind::UnsqueezeOp { .. } => "unsqueeze",
+        BackwardOpKind::SqueezeOp { .. } => "squeeze",
+        BackwardOpKind::TransposeOp { .. } => "transpose",
+        BackwardOpKind::ExpandOp { .. } => "expand",
+        BackwardOpKind::BroadcastOp { .. } => "broadcast",
+        BackwardOpKind::PadOp { .. } => "pad",
+        BackwardOpKind::SliceOp { .. } => "slice",
+        BackwardOpKind::StridedSliceOp { .. } => "strided_slice",
+        BackwardOpKind::ReshapeOp { .. } => "reshape",
+        BackwardOpKind::CastOp => "cast",
+    }
+}
+
 impl BackwardSource {
     /// Rebuild the concrete, typed `NBackwardOp` (operands + rule struct) for a
     /// node of dtype `T`. Called at backward-build time, so every rule's
@@ -181,13 +218,16 @@ impl BackwardSource {
     ///
     /// Every operand must have the node's dtype: only a differentiable cast
     /// connects different dtypes, and it uses its own rule.
-    pub(crate) fn into_grad_fn<T: FloatRepr>(self) -> Box<dyn GradFnTrait<T>> {
+    pub(crate) fn into_grad_fn<T: FloatRepr>(
+        self,
+        conv2d_profile: Option<Conv2dProfile>,
+    ) -> Box<dyn GradFnTrait<T>> {
         let operands = self
             .operands
             .into_iter()
             .map(|handle| T::take_erased(handle.into_erased()))
             .collect();
-        box_grad_rule(operands, self.op)
+        box_grad_rule(operands, self.op, conv2d_profile)
     }
 }
 
@@ -195,6 +235,7 @@ impl BackwardSource {
 fn box_grad_rule<T: Float>(
     operands: Vec<GraphTensor<T>>,
     op: BackwardOpKind,
+    conv2d_profile: Option<Conv2dProfile>,
 ) -> Box<dyn GradFnTrait<T>> {
     fn box_rule<Op, const N: usize, T: Float>(
         operands: Vec<GraphTensor<T>>,
@@ -227,6 +268,7 @@ fn box_grad_rule<T: Float>(
                 stride,
                 padding,
                 dilation,
+                profile: conv2d_profile,
             },
         ),
         BackwardOpKind::PowOp => box_rule::<PowOp, 2, T>(operands, PowOp),
@@ -298,6 +340,8 @@ pub(crate) trait ErasedGradFn {
         retain_graph: bool,
         out: &mut Vec<Option<GradValue>>,
     );
+
+    fn profile_name(&self) -> &'static str;
 }
 
 /// A concrete `GradFnTrait<T>` plus a reusable per-operand scratch buffer, seen
@@ -305,6 +349,7 @@ pub(crate) trait ErasedGradFn {
 struct TypedGradFn<T: FloatRepr> {
     inner: Box<dyn GradFnTrait<T>>,
     scratch: Vec<Option<GraphTensor<T>>>,
+    profile_name: &'static str,
 }
 
 impl<T: FloatRepr> ErasedGradFn for TypedGradFn<T> {
@@ -325,6 +370,10 @@ impl<T: FloatRepr> ErasedGradFn for TypedGradFn<T> {
                 .drain(..)
                 .map(|grad| grad.map(T::into_grad_value)),
         );
+    }
+
+    fn profile_name(&self) -> &'static str {
+        self.profile_name
     }
 }
 
@@ -379,17 +428,29 @@ impl ErasedGradFn for ErasedCastGradFn {
         out.clear();
         out.push(Some(grad));
     }
+
+    fn profile_name(&self) -> &'static str {
+        "cast"
+    }
 }
 
 /// Materialize a node's deferred edge into its erased backward rule.
 ///
 /// The `f32`/`f64` match is the only place the scheduler picks a concrete float
 /// for a node; everything downstream is erased.
-pub(crate) fn materialize_grad_fn(node: &ErasedTensor) -> Option<Box<dyn ErasedGradFn>> {
-    fn make<T: FloatRepr>(source: BackwardSource) -> Box<dyn ErasedGradFn> {
+pub(crate) fn materialize_grad_fn(
+    node: &ErasedTensor,
+    conv2d_profile: Option<Conv2dProfile>,
+) -> Option<Box<dyn ErasedGradFn>> {
+    fn make<T: FloatRepr>(
+        source: BackwardSource,
+        profile_name: &'static str,
+        conv2d_profile: Option<Conv2dProfile>,
+    ) -> Box<dyn ErasedGradFn> {
         Box::new(TypedGradFn::<T> {
-            inner: source.into_grad_fn::<T>(),
+            inner: source.into_grad_fn::<T>(conv2d_profile),
             scratch: Vec::new(),
+            profile_name,
         })
     }
 
@@ -397,17 +458,19 @@ pub(crate) fn materialize_grad_fn(node: &ErasedTensor) -> Option<Box<dyn ErasedG
     match node {
         ErasedTensor::F32(g) => {
             let source = g.node.grad_fn()?;
+            let profile_name = backward_op_name(&source.op);
             if matches!(&source.op, BackwardOpKind::CastOp) {
                 return Some(cast_grad_fn(source, dst));
             }
-            Some(make::<f32>(source.clone()))
+            Some(make::<f32>(source.clone(), profile_name, conv2d_profile))
         }
         ErasedTensor::F64(g) => {
             let source = g.node.grad_fn()?;
+            let profile_name = backward_op_name(&source.op);
             if matches!(&source.op, BackwardOpKind::CastOp) {
                 return Some(cast_grad_fn(source, dst));
             }
-            Some(make::<f64>(source.clone()))
+            Some(make::<f64>(source.clone(), profile_name, conv2d_profile))
         }
     }
 }
