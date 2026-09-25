@@ -1,5 +1,7 @@
 use minitorch_rust::core::GraphTensor;
-use minitorch_rust::core::nn::compute::{Conv2d, Conv2dPadding, conv2d};
+use minitorch_rust::core::nn::compute::{
+    Conv2d, Conv2dPadding, Size2, conv2d, conv2d_with_options,
+};
 use minitorch_rust::core::nn::module::Forward1;
 use minitorch_rust::core::tensor::AbstractTensor;
 
@@ -438,6 +440,125 @@ fn conv2d_direct_backward_handles_same_padding() {
     for (flat, value) in expected_dw.iter().enumerate() {
         let index = unflatten(dw.shape(), flat);
         approx(*dw.at(&index), *value);
+    }
+}
+
+/// Check forward, `grad_input`, and `grad_weight` against the reference
+/// implementations for a valid-padding stride-1/dilation-1 convolution.
+///
+/// Zero padding is deliberate: it makes edge output positions boundary
+/// positions, so the interior/boundary split in the input-gradient kernel is
+/// covered by the same test.
+fn assert_conv_matches_reference(input: &GraphTensor, weight: &GraphTensor) {
+    let output = conv2d(input, weight);
+    let expected = ref_forward(input, weight);
+    assert_eq!(
+        output.shape(),
+        &[
+            input.shape()[0],
+            weight.shape()[1],
+            input.shape()[2] - weight.shape()[2] + 1,
+            input.shape()[3] - weight.shape()[3] + 1,
+        ]
+    );
+    for (flat, value) in expected.iter().enumerate() {
+        approx(*output.at(&unflatten(output.shape(), flat)), *value);
+    }
+
+    let grads = output.sum(&[], false).backward(true);
+
+    let dx = grads.get(input).unwrap();
+    let expected_dx = ref_input_grad(input.shape(), weight);
+    for (flat, value) in expected_dx.iter().enumerate() {
+        approx(*dx.at(&unflatten(dx.shape(), flat)), *value);
+    }
+
+    let dw = grads.get(weight).unwrap();
+    let expected_dw = ref_weight_grad(input, weight);
+    for (flat, value) in expected_dw.iter().enumerate() {
+        approx(*dw.at(&unflatten(dw.shape(), flat)), *value);
+    }
+}
+
+/// Build an input whose every element is distinct, so an indexing slip in the
+/// tiled kernels cannot cancel out. A constant-filled tensor would make any
+/// permutation of the output-channel axis undetectable.
+fn distinct_input(shape: &[usize]) -> GraphTensor {
+    let mut flat = Vec::with_capacity(shape.iter().product());
+    for i in 0..shape.iter().product::<usize>() {
+        flat.push(i as f64 * 0.017 - 0.31);
+    }
+    let mut rows: Vec<Vec<Vec<Vec<f64>>>> = Vec::with_capacity(shape[0]);
+    for b in 0..shape[0] {
+        let mut channels = Vec::with_capacity(shape[1]);
+        for c in 0..shape[1] {
+            let mut planes = Vec::with_capacity(shape[2]);
+            for h in 0..shape[2] {
+                let start = (b * shape[1] * shape[2] + c * shape[2] + h) * shape[3];
+                planes.push(flat[start..start + shape[3]].to_vec());
+            }
+            channels.push(planes);
+        }
+        rows.push(channels);
+    }
+    GraphTensor::wrap(rows, true)
+}
+
+/// Build a weight with a distinct value per `(ci, co, i, j)`.
+fn distinct_weight(in_channels: usize, out_channels: usize, kh: usize, kw: usize) -> GraphTensor {
+    let mut rows = Vec::with_capacity(in_channels);
+    for ci in 0..in_channels {
+        let mut channels = Vec::with_capacity(out_channels);
+        for co in 0..out_channels {
+            let mut plane: Vec<Vec<f64>> = Vec::with_capacity(kh);
+            for i in 0..kh {
+                let row = (0..kw)
+                    .map(|j| {
+                        ci as f64 * 0.7 + co as f64 * 0.13 + i as f64 * 0.031 + j as f64 * 0.017
+                    })
+                    .collect();
+                plane.push(row);
+            }
+            channels.push(plane);
+        }
+        rows.push(channels);
+    }
+    GraphTensor::wrap(rows, true)
+}
+
+/// The register-tiled loops process output channels in blocks of eight, so a
+/// tensor narrower than that exercises only the remainder path. These cover the
+/// tiled body, an exact multiple of the tile width, and a remainder.
+#[test]
+fn conv2d_output_channel_tiling_covers_tile_and_remainder() {
+    for out_channels in [8usize, 10, 64] {
+        let input = distinct_input(&[2, 3, 5, 4]);
+        let weight = distinct_weight(3, out_channels, 3, 2);
+        assert_conv_matches_reference(&input, &weight);
+    }
+}
+
+/// Same padding with more than eight output channels must agree exactly with
+/// explicitly zero-padding the input and running the valid-padding path.
+#[test]
+fn conv2d_tiled_same_padding_matches_explicit_padding() {
+    for out_channels in [9usize, 16] {
+        let input = distinct_input(&[2, 2, 5, 5]);
+        let weight = distinct_weight(2, out_channels, 3, 3);
+
+        let same =
+            conv2d_with_options(&input, &weight, Size2::ONE, Conv2dPadding::Same, Size2::ONE);
+        let padded = input.pad(&[(0, 0), (0, 0), (1, 1), (1, 1)]);
+        let valid = conv2d(&padded, &weight);
+
+        assert_eq!(same.shape(), &[2, out_channels, 5, 5]);
+        assert_eq!(same.shape(), valid.shape());
+        for flat in 0..same.numel() {
+            approx(
+                *same.at(&unflatten(same.shape(), flat)),
+                *valid.at(&unflatten(valid.shape(), flat)),
+            );
+        }
     }
 }
 

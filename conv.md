@@ -41,51 +41,52 @@ Notation used below:
 
 ### 1.1 Measured baseline
 
-The current code is the post-revert state with the **stride-aware matmul**
-rewrite applied. The per-tap output-channel chunk blocking (§5.1) and the
-square-kernel specialization (§5.2) both remain removed, and the convolution
-kernels are unchanged from the direct stride-1/dilation-1 paths described below.
+The current code is the post-revert state with both the **stride-aware matmul**
+rewrite and the **register-blocked conv accumulator** applied. The per-tap
+output-channel chunk blocking (§5.1) and the square-kernel specialization (§5.2)
+both remain removed.
 
 Captured on the development machine: Apple M1 MacBook Air, 8 GB, 4P + 4E cores,
 `rustc 1.97.1`, release profile with `lto = true` and `codegen-units = 1`.
 
 | Metric | Value |
 |---|---:|
-| Epoch-1 training time | `267.856 s` |
-| Initial loss evaluation | `13.370 s` |
-| Validation loss time | `13.462 s` |
+| Epoch-1 training time | `234.815 s` |
+| Initial loss evaluation | `10.485 s` |
+| Validation loss time | `10.455 s` |
 | Smoothed training loss | `0.3363628374274767` |
 | Validation loss | `0.2691631467284183` |
 
-Training time fell `9.8%` from `297.016 s` on the previous profiled run, and
-both loss values are bit-identical to every prior run, which is the expected
-result for a rewrite that preserves accumulation order.
+Training time fell `12.3%` from `267.856 s` on the previous profiled run, and
+`21.6%` from the `299.386 s` clean baseline recorded in Stage 6. Both loss
+values remain bit-identical to every prior run, even though §6.3 reassociates
+`grad_input`'s reduction.
 
 Steady-state section timings, taken as the median over the nine logged steps
 100–900. Step 938 is a half batch and is excluded; see §1.2.
 
 | Conv2 backward | Median | Conv1 backward | Median |
 |---|---:|---|---:|
-| `pack grad_output` | `1.92 ms` | `pack grad_output` | `3.28 ms` |
+| `pack grad_output` | `1.92 ms` | `pack grad_output` | `3.27 ms` |
 | `pack weight` | `0.02 ms` | `pack weight` | `0.00 ms` |
-| `padded input` | `2.06 ms` | `padded input` | `0.24 ms` |
-| `grad_weight` | `51.18 ms` | `grad_weight` | `2.51 ms` |
-| `grad_input` | `65.06 ms` | `grad_input` | `4.58 ms` |
-| `unpack grad_weight` | `0.01 ms` | `unpack grad_weight` | `0.00 ms` |
-| **total** | **`120.33 ms`** | **total** | **`10.78 ms`** |
+| `padded input` | `2.07 ms` | `padded input` | `0.24 ms` |
+| `grad_weight` | `51.07 ms` | `grad_weight` | `2.54 ms` |
+| `grad_input` | `51.16 ms` | `grad_input` | `3.25 ms` |
+| `unpack grad_weight` | `0.02 ms` | `unpack grad_weight` | `0.00 ms` |
+| **total** | **`106.72 ms`** | **total** | **`9.49 ms`** |
 
 | Forward | Median | Backward op | Median |
 |---|---:|---|---:|
-| `conv1` | `11.38 ms` | `conv2d` | `131.16 ms` |
-| `conv2` | `59.15 ms` | `matmul` | `24.61 ms` |
-| `linear1` | `3.58 ms` | `maximum` | `20.36 ms` |
-| `pool1` | `8.31 ms` | `max_pool2d` | `4.13 ms` |
-| `relu1` | `4.93 ms` | `add` | `2.54 ms` |
-| `pool2` | `4.17 ms` | `mul` | `0.58 ms` |
-| `relu2` | `2.41 ms` | | |
+| `conv1` | `9.28 ms` | `conv2d` | `116.21 ms` |
+| `conv2` | `41.65 ms` | `matmul` | `24.33 ms` |
+| `linear1` | `3.57 ms` | `maximum` | `20.23 ms` |
+| `pool1` | `7.35 ms` | `max_pool2d` | `4.24 ms` |
+| `relu1` | `4.76 ms` | `add` | `2.79 ms` |
+| `pool2` | `4.03 ms` | `mul` | `0.56 ms` |
+| `relu2` | `2.38 ms` | | |
 | `dropout` | `4.89 ms` | | |
 
-Per-step totals: forward `~99 ms`, backward `~185 ms`.
+Per-step totals: forward `~78 ms`, backward `~170 ms`.
 
 ### 1.2 Two diagnostic observations
 
@@ -96,10 +97,10 @@ lands at `49.4–49.9%` of the full-batch median in every section: `grad_input`
 negligible fixed cost. There is no first-touch page-fault or warmup artefact
 inflating the numbers, and no memory-footprint cliff.
 
-**Conv1's `pack grad_output` is its single largest section.** At `3.28 ms` it
+**Conv1's `pack grad_output` is its single largest section.** At `3.27 ms` it
 exceeds Conv2's `1.92 ms` despite Conv1 doing far less arithmetic, because
 Conv1's output is `[64, 32, 28, 28]` = 1.6 M elements against Conv2's 0.8 M.
-Packing is roughly 30% of Conv1's entire backward pass. This is the clearest
+Packing is roughly 34% of Conv1's entire backward pass. This is the clearest
 case in the model where removing a data transformation beats optimizing a
 kernel, and it is invisible in the aggregate `conv2d` total.
 
@@ -115,10 +116,14 @@ with two `f64` lanes each give 8 FP64 flops/cycle, about `25.6 GFLOP/s` at
 
 | Loop | Time | Achieved | Share of ~25.6 GFLOP/s |
 |---|---:|---:|---:|
-| `grad_input` | 65.06 ms | 7.1 GFLOP/s | ~28% |
-| `grad_weight` | 51.18 ms | 9.0 GFLOP/s | ~35% |
-| forward | 59.15 ms | 7.8 GFLOP/s | ~31% |
-| `conv1` forward | 11.38 ms | 2.5 GFLOP/s | ~10% |
+| `grad_input` | 51.16 ms | 9.0 GFLOP/s | ~35% |
+| `grad_weight` | 51.07 ms | 9.1 GFLOP/s | ~35% |
+| forward | 41.65 ms | 11.1 GFLOP/s | ~43% |
+| `conv1` forward | 9.28 ms | 3.1 GFLOP/s | ~12% |
+
+The register tile moved all three of the tiled loops up by roughly 5–12 points
+of peak. The remaining gap is no longer dominated by accumulator traffic; see
+§4.5 for what is left in the inner loop.
 
 Two caveats make these figures *favourable* to any argument that the code is
 vectorization-starved. The process is single-threaded on a 4P + 4E machine, so
@@ -337,8 +342,8 @@ coordinate mapping:
 - The input-gradient accumulator is one reusable `CO`-element buffer.
 - The upstream-gradient and weight vectors are contiguous within each tap.
 
-This is the section that dominates Conv2 backward: a steady-state median of
-`65.06 ms`, or 54% of the whole Conv2 backward pass.
+This is the section that dominates Conv2 backward, level with `grad_weight` at
+`51.16 ms` and `51.07 ms` respectively — together 96% of the pass.
 
 ### 4.4 Backward cache locality
 
@@ -424,10 +429,51 @@ to get the fused form; it is a std method, stable, and adds no dependency.
 Arithmetic intensity confirms the diagnosis. `grad_input` at `65.06 ms` and an
 estimated 3.2 GHz implies about 518 cycles per output position, carrying 576
 vector loads and 288 vector stores. Two 128-bit loads per cycle gives a
-floor of roughly 432 cycles, so the loop sits at ~84% of its load-port limit
-while using only about 28% of the FMA throughput. **The loops are load-port
+floor of roughly 432 cycles, so the loop sat at ~84% of its load-port limit
+while using only about 28% of the FMA throughput. **The loops were load-port
 bound, not vector-width bound.** This is why adding SIMD cannot help, and why
 reducing loads is the only lever that matters.
+
+**Status: fixed, and the prediction was too optimistic.** §6.3 has since been
+applied to the forward loop and to `grad_input`. Both now emit the accumulator
+as `v.2d` registers held across the tap loop, with no accumulator memory
+traffic at all:
+
+```text
+grad_input, one tap, 8 output channels:
+  ldp q7, q6, [x1, #0x20]   ldp q17, q16, [x1]      ; grad_output
+  ldp q19, q18, [x21, #0x20] ldp q21, v20, [x21]   ; packed_weight
+  fmul.2d v17, v16, v7, v6
+  fadd.2d v3, v3, v6        ; accumulators live in v2..v5
+  fadd.2d v4, v4, v7
+  fadd.2d v5, v5, v16
+  fadd.2d v2, v2, v17
+```
+
+Memory operations per 8 lanes per tap fell from 12 loads + 4 stores to 8 loads
+and 0 stores, and all 8 remaining loads are useful. The forward loop improved
+the same way: 8 memory ops down to 3.
+
+Measured effect: Conv2 `grad_input` `65.06 → 51.16 ms` (−21.4%), Conv2 forward
+`59.15 → 41.65 ms` (−29.6%), Conv1 `grad_input` `4.58 → 3.25 ms` (−29.0%).
+The load-port model predicted `grad_input` would roughly halve; it did not.
+Three costs remain in the inner loop that the memory model ignored:
+
+- Two bounds-check branches per iteration, from the sub-slice range checks.
+- A stack reload of the tile length (`ldr x22, [sp, #0x200]`) inside the loop.
+- The block loop now sits outside the tap loop, so tap addresses are recomputed
+  eight times per output position instead of once.
+
+**The arithmetic-intensity models in this document are useful for ruling a
+change out, not for sizing it.** Two predictions have now come in roughly 2×
+optimistic: the matmul rewrite (§4.6) and this one.
+
+Because the final reduction over output channels is now a sum of eight-element
+block partials rather than a 64-element sequential fold, `grad_input`
+**reassociates**. Forward and `grad_weight` are bit-identical, since neither
+reorders its own accumulation. Despite the structural reassociation, the
+measured loss values are bit-identical to every prior profile — the
+reassociated sums evidently produce the same doubles for this data.
 
 ### 4.6 The same defect, fixed, in `matmul`
 
@@ -604,15 +650,40 @@ proposed: for position:  for lane_block:                           ; CO / BLOCK 
   per-tap `chunks_mut` version of this idea regressed badly — the tile must be
   a fixed-size array indexed directly, not dynamic chunk iterators.
 
-  **Status: next action.** §4.6 validates the mechanism and the exact target
-  codegen on the structurally identical matmul kernel, where it delivered 1.7×
-  in backward and 4.6× in forward. The risk specific to convolution is register
-  pressure: Conv2's accumulator is 64 `f64` = 32 NEON registers, the entire
-  register file, so it cannot be held whole and must be split into a tile plus
-  a tail. The `1.8×` estimate above remains a prediction from the load-port
-  model, not a measurement.
+  **Status: applied to forward and `grad_input`, measured.** See §4.5. The tile
+  width is `OUT_CHANNEL_TILE = 8` in `conv.rs`, chosen to match the four `v.2d`
+  accumulators the compiler already selects, with a scalar remainder loop for
+  `out_channels` that is not a multiple of it. Delivered `−21.4%` on `grad_input`
+  and `−29.6%` on forward, against a predicted `~2×`. The `grad_input` reduction
+  over output channels now sums eight-element block partials instead of folding
+  64 elements sequentially, so it **reassociates**; forward and `grad_weight`
+  remain bit-identical, and the measured losses did not move.
 
-### 6.4 Spatial tiling for `grad_weight`
+### 6.4 Register-blocking `grad_weight` — now the largest section
+
+**`grad_weight` is not covered by §6.3, and the argument does not transfer.**
+Its accumulator is read-modify-written once per *output position* — 12,544 times
+per tap for Conv2 — so it cannot live in registers at all: the value has to
+survive the entire position loop. At `51.07 ms` it is now level with `grad_input`
+and the single largest convolution section in the model.
+
+- **Data access:** Blocking over output channels alone does not reduce anything.
+  For a fixed tap, each of the 12,544 positions touches all 64 accumulators, and
+  the buffer is `144 KiB` — just over the 128 KiB L1. Interchanging the loops to
+  `b, ic, kh, kw, oh, ow` would sweep a 512-byte slice 196 times consecutively
+  instead of thrashing all 18,432 elements between reuses, but would then
+  re-stream the 6.13 MiB `grad_output` once per tap.
+- **Allocations:** Unchanged; the packed gradient buffer is already minimal.
+- **Cache locality:** This is a cache-blocking problem, not a register problem.
+  A two-dimensional tile over channels and positions is the alternative, but
+  needs a 2D accumulator panel that will not fit in registers either.
+- **Pros:** Largest untouched arithmetic in the model. A loop interchange is a
+  small, local change with no new data structures.
+- **Cons:** A plain interchange trades 3.7 GB of L2 accumulator traffic for
+  1.76 GB of streamed `grad_output`; which wins is not predictable from the
+  model, and this model has been wrong twice. It must be measured.
+- **Status: next candidate**, but it needs a measurement plan rather than a
+  confident prediction.
 
 **Idea:** Process neighboring output positions in a tile and reuse the packed
 upstream-gradient and input values.
@@ -807,36 +878,44 @@ Reordered against the measured baseline in §1.1 and the instruction-level
 analysis in §4.5. §4.6 records the one item already delivered.
 
 0. **Done: matmul stride-aware rewrite.** Applied and measured. `matmul`
-   backward `42.95 → 24.61 ms`, `linear1` forward `16.54 → 3.58 ms`, epoch-1
-   training `297.0 → 267.9 s`, losses bit-identical.
-1. **Keep the accumulator in registers (§6.3).** This is the only remaining
-   change that attacks the measured constraint. The loops are load-port bound at
-   ~84% of limit, half to two-thirds of that traffic is accumulator
-   round-trips, and the fix is a fixed-size stack tile with the tap loop
-   innermost. No dependency, no `unsafe`, no platform-specific code. The
-   mechanism is now proven on matmul (§4.6); expected `grad_input`
-   `65.06 → ~36 ms`.
-2. **Reduce the weight-gradient accumulator traffic by the same treatment
-   (§6.3).** `grad_weight` has the worse accumulator share of the two, at 67%.
-3. **Use `f64::mul_add` (§6.8).** Zero dependency and strictly more accurate.
-   Expected small, because the loops are not FP-issue bound, but nearly free.
-   Land it as its own measured step, after step 1.
-4. **Target `max_pool2d_backward` (`reduce.rs`).** `20.36 ms`, stable across
+   backward `42.95 → 24.33 ms`, `linear1` forward `16.54 → 3.57 ms`, losses
+   bit-identical.
+1. **Done: register-blocked conv accumulator (§6.3).** Applied to the forward
+   loop and to `grad_input`, measured. Conv2 forward `59.15 → 41.65 ms`
+   (−29.6%), Conv2 `grad_input` `65.06 → 51.16 ms` (−21.4%), losses
+   bit-identical. Epoch-1 training `267.9 → 234.8 s`.
+2. **Attack `grad_weight` (§6.4).** Now the largest convolution section at
+   `51.07 ms`, level with `grad_input`. Register blocking does not apply since
+   the accumulator is rewritten once per output position. Two candidates: a loop
+   interchange for cache reuse, or a two-dimensional channel/position tile.
+   **Both predictions in this document have come in ~2× optimistic, so treat any
+   estimate here as a hypothesis and measure it.**
+3. **Target `max_pool2d_backward` (`reduce.rs`).** `20.23 ms`, stable across
    every profile, third-largest backward category, and never attempted. The
    inner loop carries a bounds check with a `panic!` per scattered element and
    iterates the upstream gradient through a `strided_indices()` div/mod
-   iterator. This is the highest-value unexplored code in the model.
-5. **Avoid materializing the padded input (§6.2).** `2.06 ms` for Conv2 and
-   `0.24 ms` for Conv1. Blocked behind step 1: extra per-tap work is expensive
-   while the loops are at ~84% of their load-port limit.
-6. **Consider the `fold` reduction in `grad_input` (§6.8).** Real but bounded;
-   measure it only after step 1, when the section it lives in is smaller.
-7. **Consider im2col plus a custom GEMM (§6.6) only after step 1.** If register
-   blocking reaches the load-port limit, the case for im2col weakens
-   considerably, since im2col adds its own large memory passes.
+   iterator. Unlike items 1–2 its problem is structural rather than a tight
+   optimization race, which makes it the cheapest unexplored code in the model.
+4. **Remove the residual overhead in the tiled loops (§4.5).** Two
+   bounds-check branches and a stack reload of the tile length remain per
+   iteration, and the block loop forces tap addresses to be recomputed eight
+   times per position. Cheap to try now that the section is smaller and the
+   effect is measurable in isolation.
+5. **Use `f64::mul_add` (§6.8).** Zero dependency and strictly more accurate.
+   The three tiled loops now run at 35–43% of FP64 peak, up from 28–35%, so
+   there is less headroom in the FMA pipes than there was when this item was
+   written. Still nearly free, but a smaller prize.
+6. **Avoid materializing the padded input (§6.2).** `2.07 ms` for Conv2 and
+   `0.24 ms` for Conv1. Worth less now that the arithmetic loops are no longer
+   at ~84% of their load-port limit.
+7. **Consider im2col plus a custom GEMM (§6.6) last.** The direct kernels are
+   now at 35–43% of peak, which weakens the case considerably: im2col adds a
+   ~29 MiB buffer and its own passes on top of loops that are no longer
+   obviously inefficient.
 8. **Treat native BLAS (§6.7) and multithreading (§6.9) as separate
-   architectural/dependency decisions.** Neither is warranted before the
-   single-threaded register blocking is exhausted.
+   architectural/dependency decisions.** Neither is warranted before items 2–3
+   are exhausted; both would multiply an already-serial pipeline rather than fix
+   its arithmetic intensity.
 9. **Do not reintroduce per-tap output-channel chunk blocking (§5.1);** it was
    measured to regress badly, and §6.3 is the structurally different
    replacement for the same idea.
@@ -856,7 +935,13 @@ comparable to a clean one, so compare like with like. Section deltas under
 roughly 15% should be treated as scheduler noise, since the process is
 single-threaded on a 4P + 4E machine and migrates between Firestorm
 performance and efficiency cores; a step that regresses in every section at
-once, as step 300 did in the latest profile, is a thermal artifact rather than
-a change in behaviour. A correctness change is never accepted on timing alone:
-the smoothed training loss and validation loss must be compared against the
-§1.1 baseline.
+once, as steps 200 and 500 did in the latest profile, is a thermal artifact
+rather than a change in behaviour. A correctness change is never accepted on
+timing alone: the smoothed training loss and validation loss must be compared
+against the §1.1 baseline.
+
+Every *untouched* path in a profile is a free control. In Stage 8, `grad_weight`
+(−0.2%), `matmul` (−1.1%), `linear1` (−0.3%), `maximum` (−0.7%), and the
+`pack grad_output` and `padded input` sections (−0.1% and +0.3%) all held
+stationary, which is what established that the change was isolated. Compare
+against those before believing a delta.

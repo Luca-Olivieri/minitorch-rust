@@ -104,6 +104,17 @@ impl<'a> Conv2dBackwardClock<'a> {
     }
 }
 
+/// Output channels accumulated per pass by the register-blocked convolution
+/// loops.
+///
+/// Eight `f64` occupy four 128-bit NEON registers, which is the accumulator
+/// width the compiler already selects for these kernels on this target, and
+/// leave the remaining registers free for the tap operands. A fixed-size local
+/// array of this width is what lets scalar replacement keep the partial sums in
+/// registers across the whole tap loop; a `Vec` accumulator of dynamic length
+/// cannot be promoted and is reloaded once per tap instead.
+const OUT_CHANNEL_TILE: usize = 8;
+
 /// Compute a grouped-one batched 2D cross-correlation directly over storage.
 ///
 /// `input` is `[batch, in_channels, height, width]`, `weight` is
@@ -156,35 +167,67 @@ pub(crate) fn conv2d<T: Numeric>(
     // contiguous and each input value can be reused across all output channels.
     let packed_weight = pack_weight(weight, in_channels, out_channels, kernel_h, kernel_w);
     let mut output = vec![T::ZERO; batch * out_channels * out_h * out_w];
-    let mut accum = vec![T::ZERO; out_channels];
 
     let input_strides = &padded_input.strides;
     let input_offset = padded_input.offset;
+    let tiled_channels = out_channels - out_channels % OUT_CHANNEL_TILE;
 
     for b in 0..batch {
         let input_batch_base = input_offset + b * input_strides[0];
         for oh in 0..out_h {
             for ow in 0..out_w {
-                accum.fill(T::ZERO);
+                // One register tile of output channels at a time. Holding the
+                // tile across the whole tap loop is what keeps the partial sums
+                // in registers; a full-width accumulator is reloaded and
+                // rewritten once per tap instead.
+                for oc_base in (0..tiled_channels).step_by(OUT_CHANNEL_TILE) {
+                    let mut tile = [T::ZERO; OUT_CHANNEL_TILE];
 
-                for ic in 0..in_channels {
-                    let input_channel_base = input_batch_base + ic * input_strides[1];
-                    for kh in 0..kernel_h {
-                        let input_row = input_channel_base
-                            + (oh * stride_h + kh * dilation_h) * input_strides[2];
-                        for kw in 0..kernel_w {
-                            let input_value = padded_input.buffer
-                                [input_row + (ow * stride_w + kw * dilation_w) * input_strides[3]];
-                            let packed_base = ((ic * kernel_h + kh) * kernel_w + kw) * out_channels;
-                            for oc in 0..out_channels {
-                                accum[oc] += input_value * packed_weight[packed_base + oc];
+                    for ic in 0..in_channels {
+                        let input_channel_base = input_batch_base + ic * input_strides[1];
+                        for kh in 0..kernel_h {
+                            let input_row = input_channel_base
+                                + (oh * stride_h + kh * dilation_h) * input_strides[2];
+                            for kw in 0..kernel_w {
+                                let input_value = padded_input.buffer[input_row
+                                    + (ow * stride_w + kw * dilation_w) * input_strides[3]];
+                                let packed_base =
+                                    ((ic * kernel_h + kh) * kernel_w + kw) * out_channels + oc_base;
+                                let weight_slice =
+                                    &packed_weight[packed_base..packed_base + OUT_CHANNEL_TILE];
+                                for u in 0..OUT_CHANNEL_TILE {
+                                    tile[u] += input_value * weight_slice[u];
+                                }
                             }
                         }
                     }
+
+                    for (u, &value) in tile.iter().enumerate() {
+                        output
+                            [(b * out_channels + oc_base + u) * out_h * out_w + oh * out_w + ow] =
+                            value;
+                    }
                 }
 
-                for oc in 0..out_channels {
-                    output[(b * out_channels + oc) * out_h * out_w + oh * out_w + ow] = accum[oc];
+                // Output channels left over when `out_channels` is not a
+                // multiple of the tile width.
+                for oc in tiled_channels..out_channels {
+                    let mut sum = T::ZERO;
+                    for ic in 0..in_channels {
+                        let input_channel_base = input_batch_base + ic * input_strides[1];
+                        for kh in 0..kernel_h {
+                            let input_row = input_channel_base
+                                + (oh * stride_h + kh * dilation_h) * input_strides[2];
+                            for kw in 0..kernel_w {
+                                let input_value = padded_input.buffer[input_row
+                                    + (ow * stride_w + kw * dilation_w) * input_strides[3]];
+                                let packed_base =
+                                    ((ic * kernel_h + kh) * kernel_w + kw) * out_channels + oc;
+                                sum += input_value * packed_weight[packed_base];
+                            }
+                        }
+                    }
+                    output[(b * out_channels + oc) * out_h * out_w + oh * out_w + ow] = sum;
                 }
             }
         }
@@ -501,23 +544,33 @@ fn conv2d_grad_input_stride1_dilation1<T: Numeric>(
     geometry: Conv2dBackwardGeometry,
 ) -> Vec<T> {
     let mut grad_input = vec![T::ZERO; input_numel];
-    let mut input_accumulator = vec![T::ZERO; geometry.out_channels];
-    let accumulate_tap =
-        |accumulator: &mut [T], b: usize, oh: usize, ow: usize, ic: usize, kh: usize, kw: usize| {
-            let grad_output_base =
-                ((b * geometry.out_h + oh) * geometry.out_w + ow) * geometry.out_channels;
-            let packed_base =
-                ((ic * geometry.kernel_h + kh) * geometry.kernel_w + kw) * geometry.out_channels;
-            let grad_output_slice =
-                &packed_grad_output[grad_output_base..grad_output_base + geometry.out_channels];
-            let weight_slice = &packed_weight[packed_base..packed_base + geometry.out_channels];
-            for (accumulator_value, (&grad_output_value, &weight_value)) in accumulator
-                .iter_mut()
-                .zip(grad_output_slice.iter().zip(weight_slice.iter()))
-            {
-                *accumulator_value += grad_output_value * weight_value;
-            }
-        };
+    let tiled_channels = geometry.out_channels - geometry.out_channels % OUT_CHANNEL_TILE;
+    // Accumulate one register tile of output channels, so the partial sums stay
+    // in vector registers across the tap loop rather than being reloaded from a
+    // full-width accumulator once per tap.
+    let accumulate_tap = |tile: &mut [T],
+                          b: usize,
+                          oh: usize,
+                          ow: usize,
+                          ic: usize,
+                          kh: usize,
+                          kw: usize,
+                          oc_base: usize| {
+        let grad_output_base =
+            ((b * geometry.out_h + oh) * geometry.out_w + ow) * geometry.out_channels + oc_base;
+        let packed_base = ((ic * geometry.kernel_h + kh) * geometry.kernel_w + kw)
+            * geometry.out_channels
+            + oc_base;
+        let grad_output_slice =
+            &packed_grad_output[grad_output_base..grad_output_base + tile.len()];
+        let weight_slice = &packed_weight[packed_base..packed_base + tile.len()];
+        for (tile_value, (&grad_output_value, &weight_value)) in tile
+            .iter_mut()
+            .zip(grad_output_slice.iter().zip(weight_slice.iter()))
+        {
+            *tile_value += grad_output_value * weight_value;
+        }
+    };
 
     for b in 0..geometry.batch {
         for ic in 0..geometry.in_channels {
@@ -531,18 +584,49 @@ fn conv2d_grad_input_stride1_dilation1<T: Numeric>(
                     let padded_iw = iw + geometry.pad_left;
                     let column_interior = padded_iw >= geometry.kernel_w.saturating_sub(1)
                         && padded_iw < geometry.out_w;
-                    input_accumulator.fill(T::ZERO);
+                    let mut total = T::ZERO;
 
-                    // Interior positions avoid per-tap coordinate bounds checks.
-                    if row_interior && column_interior {
-                        for kh in 0..geometry.kernel_h {
-                            let oh = padded_ih - kh;
-                            for kw in 0..geometry.kernel_w {
-                                let ow = padded_iw - kw;
-                                accumulate_tap(&mut input_accumulator, b, oh, ow, ic, kh, kw);
+                    for oc_base in (0..tiled_channels).step_by(OUT_CHANNEL_TILE) {
+                        let mut tile = [T::ZERO; OUT_CHANNEL_TILE];
+                        // Interior positions avoid per-tap coordinate bounds checks.
+                        if row_interior && column_interior {
+                            for kh in 0..geometry.kernel_h {
+                                let oh = padded_ih - kh;
+                                for kw in 0..geometry.kernel_w {
+                                    let ow = padded_iw - kw;
+                                    accumulate_tap(&mut tile, b, oh, ow, ic, kh, kw, oc_base);
+                                }
+                            }
+                        } else {
+                            for kh in 0..geometry.kernel_h {
+                                if padded_ih < kh {
+                                    continue;
+                                }
+                                let oh = padded_ih - kh;
+                                if oh >= geometry.out_h {
+                                    continue;
+                                }
+                                for kw in 0..geometry.kernel_w {
+                                    if padded_iw < kw {
+                                        continue;
+                                    }
+                                    let ow = padded_iw - kw;
+                                    if ow >= geometry.out_w {
+                                        continue;
+                                    }
+                                    accumulate_tap(&mut tile, b, oh, ow, ic, kh, kw, oc_base);
+                                }
                             }
                         }
-                    } else {
+                        for &value in tile.iter() {
+                            total += value;
+                        }
+                    }
+
+                    // Output channels left over when `out_channels` is not a
+                    // multiple of the tile width.
+                    for oc in tiled_channels..geometry.out_channels {
+                        let mut sum = T::ZERO;
                         for kh in 0..geometry.kernel_h {
                             if padded_ih < kh {
                                 continue;
@@ -551,7 +635,6 @@ fn conv2d_grad_input_stride1_dilation1<T: Numeric>(
                             if oh >= geometry.out_h {
                                 continue;
                             }
-
                             for kw in 0..geometry.kernel_w {
                                 if padded_iw < kw {
                                     continue;
@@ -560,15 +643,22 @@ fn conv2d_grad_input_stride1_dilation1<T: Numeric>(
                                 if ow >= geometry.out_w {
                                     continue;
                                 }
-
-                                accumulate_tap(&mut input_accumulator, b, oh, ow, ic, kh, kw);
+                                let grad_output_base = ((b * geometry.out_h + oh) * geometry.out_w
+                                    + ow)
+                                    * geometry.out_channels
+                                    + oc;
+                                let packed_base =
+                                    ((ic * geometry.kernel_h + kh) * geometry.kernel_w + kw)
+                                        * geometry.out_channels
+                                        + oc;
+                                sum += packed_grad_output[grad_output_base]
+                                    * packed_weight[packed_base];
                             }
                         }
+                        total += sum;
                     }
 
-                    grad_input[input_row_base + iw] = input_accumulator
-                        .iter()
-                        .fold(T::ZERO, |sum, &value| sum + value);
+                    grad_input[input_row_base + iw] = total;
                 }
             }
         }

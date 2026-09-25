@@ -1,7 +1,7 @@
 # MNIST Optimization History
 
 This file records the Rust MNIST `SmallCNN` optimization measurements. The
-eight Rust profiles below are transcribed from the recorded optimization runs;
+nine Rust profiles below are transcribed from the recorded optimization runs;
 the measurements are kept at their original precision so that later runs can be
 compared directly.
 
@@ -32,7 +32,7 @@ and validation time.
 - Step `938/938` is the final, smaller batch of the epoch and is not directly
   comparable to the full-size checkpoints. Use the complete epoch time for
   aggregate comparisons.
-- `grads.len() = 8` was reported at every checkpoint in all eight profiles.
+- `grads.len() = 8` was reported at every checkpoint in all nine profiles.
 - Stages 7 and 8 report the post-accumulation time as `step_time`; earlier
   stages labelled the same field `Optimizer`. The values are directly
   comparable.
@@ -41,7 +41,7 @@ and validation time.
 
 ## Summary
 
-All eight runs use the same dataset sizes reported by the program: 60,000
+All nine runs use the same dataset sizes reported by the program: 60,000
 training samples, 10,000 test samples, 938 training batches per epoch, and 157
 validation batches.
 
@@ -55,8 +55,9 @@ validation batches.
 | Conv2d backward fast path and section profiling | `feature/weird-optimizations*` | 15.693244541 s | 298.810022917 s | 0.3363628374274767 | 0.2691631467284183 | 15.547558291 s |
 | Clean run after reverting output-channel blocking | `feature/weird-optimizations*` | 15.498567500 s | 299.386094958 s | 0.3363628374274767 | 0.2691631467284183 | 15.972398166 s |
 | Stride-1/dilation-1 matmul with unit-stride paths | `feature/weird-optimizations*` | 13.369879042 s | 267.85608725 s | 0.3363628374274767 | 0.2691631467284183 | 13.462407916 s |
+| Register-blocked conv accumulator | `feature/weird-optimizations*` | 10.484789333 s | 234.81543525 s | 0.3363628374274767 | 0.2691631467284183 | 10.455207417 s |
 
-The eight profiles follow the same measurement boundary: initial evaluation,
+The nine profiles follow the same measurement boundary: initial evaluation,
 all 938 epoch-1 training batches, and validation on 157 test batches.
 
 ## 0. Baseline
@@ -744,24 +745,223 @@ section profile, which is the most recent comparable profiled run.
   rewrite is numerically faithful. All convolution sections, `maximum`,
   `pool1`/`pool2`, and the gradient count of 8 are unchanged.
 
+## 8. Register-blocked conv accumulator
+
+**Source label:** `Register-blocked conv accumulator`
+**Branch:** `feature/weird-optimizations*`
+**Command:** `MINITORCH_PROFILE_LAYERS=true make run-release`
+**Configuration:** `epochs: 1`
+**Status:** measured through first-epoch validation
+
+This profile applies the register-tiling fix identified in Stage 7 to the
+convolution forward loop and to the input-gradient kernel. Output channels are
+processed in blocks of eight (`OUT_CHANNEL_TILE`), with a fixed-size stack array
+holding the partial sums across the whole tap loop, plus a scalar remainder loop
+for `out_channels` that is not a multiple of eight. Disassembly of the release
+binary confirms the accumulators became `v.2d` registers with no accumulator
+memory traffic: memory operations per eight lanes per tap fell from twelve loads
+and four stores to eight loads, and from eight operations to three in forward.
+
+The `grad_weight` kernel is deliberately unchanged. Its accumulator is
+read-modify-written once per output position, 12,544 times per tap for Conv2, so
+it cannot be held in registers at all.
+
+**Stage 7's prediction was wrong by a wide margin.** The memory-operation model
+implied roughly a halving of `grad_input`; the measured result is `−21.4%`. The
+register tile removed the accumulator traffic exactly as intended, but the loop
+was evidently not purely load-port bound, and two bounds-check branches plus a
+stack reload of the tile length remain in the inner loop. Forward did better
+than predicted, at `−29.6%` against an expected `−40%`.
+
+| Metric | Value |
+|---|---:|
+| Dataset setup | 37.314291 ms |
+| Dataloader setup | 0.495500 ms |
+| Model setup | 3.771209 ms |
+| Training samples | 60,000 |
+| Test samples | 10,000 |
+| Training batches | 938 |
+| Test batches | 157 |
+| Initial loss | 2.3064304231216664 |
+| Initial evaluation | 10.484789333 s |
+
+### Epoch 1 checkpoints
+
+| Step | Forward | Loss | Backward | Step time | Smoothed loss | Grad entries |
+|---:|---:|---:|---:|---:|---:|---:|
+| 100 / 938 | 78.961667 ms | 16.875 µs | 170.785708 ms | 859.125 µs | 2.0968491171052857 | 8 |
+| 200 / 938 | 78.640333 ms | 16.541 µs | 184.811167 ms | 944.959 µs | 1.1225818182926737 | 8 |
+| 300 / 938 | 78.365458 ms | 17.375 µs | 170.673458 ms | 890.958 µs | 0.6686163189624389 | 8 |
+| 400 / 938 | 77.793291 ms | 16.667 µs | 170.203792 ms | 849.625 µs | 0.5889227138650284 | 8 |
+| 500 / 938 | 78.651958 ms | 17.333 µs | 180.727583 ms | 873.084 µs | 0.502232115982027 | 8 |
+| 600 / 938 | 77.794000 ms | 16.666 µs | 168.066959 ms | 874.375 µs | 0.4567609410296239 | 8 |
+| 700 / 938 | 78.691292 ms | 17.167 µs | 170.071417 ms | 778.333 µs | 0.3950323256098518 | 8 |
+| 800 / 938 | 78.527625 ms | 16.333 µs | 168.515542 ms | 859.750 µs | 0.32488540192368714 | 8 |
+| 900 / 938 | 77.688084 ms | 17.334 µs | 168.496917 ms | 900.334 µs | 0.3251889765099359 | 8 |
+| 938 / 938 | 38.543625 ms | 13.292 µs | 84.761375 ms | 946.458 µs | 0.3363628374274767 | 8 |
+
+### Forward layer profile
+
+| Step | conv1 (ms) | relu1 (ms) | pool1 (ms) | conv2 (ms) | relu2 (ms) | pool2 (ms) | flatten (ms) | dropout (ms) | linear1 (ms) | relu3 (ms) | linear2 (ms) |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 100 | 9.354875 | 4.729333 | 7.550125 | 41.691708 | 2.365708 | 4.726042 | 0.035500 | 4.895916 | 3.560875 | 0.024875 | 0.025167 |
+| 200 | 9.246208 | 4.766959 | 7.303875 | 41.652542 | 2.383417 | 4.700750 | 0.082292 | 4.876250 | 3.568000 | 0.025250 | 0.030459 |
+| 300 | 9.596625 | 4.835709 | 7.451791 | 41.618250 | 2.375083 | 3.929584 | 0.028417 | 4.896333 | 3.577542 | 0.023958 | 0.027875 |
+| 400 | 9.287167 | 4.736916 | 7.271625 | 41.690541 | 2.353125 | 3.958875 | 0.026583 | 4.848958 | 3.568208 | 0.021375 | 0.027584 |
+| 500 | 9.811083 | 4.754833 | 7.474542 | 41.616833 | 2.474792 | 3.940875 | 0.029584 | 4.879750 | 3.610167 | 0.029250 | 0.028208 |
+| 600 | 9.283375 | 4.753834 | 7.291541 | 41.645917 | 2.399750 | 3.888041 | 0.027875 | 4.887125 | 3.563041 | 0.021375 | 0.027917 |
+| 700 | 9.278750 | 4.805500 | 7.441875 | 41.588333 | 2.356958 | 4.663417 | 0.035458 | 4.904541 | 3.560208 | 0.024292 | 0.027750 |
+| 800 | 9.238750 | 4.775583 | 7.284167 | 41.693791 | 2.397500 | 4.557292 | 0.036167 | 4.916333 | 3.575083 | 0.025875 | 0.025500 |
+| 900 | 9.237125 | 4.757250 | 7.353208 | 41.605083 | 2.362292 | 3.844125 | 0.028000 | 4.883750 | 3.563458 | 0.021333 | 0.027833 |
+| 938 | 4.585500 | 2.519833 | 3.109917 | 20.832208 | 1.219333 | 1.934209 | 0.014250 | 2.448458 | 1.850792 | 0.011250 | 0.013209 |
+
+### Backward operation totals
+
+The remaining operations (`div`, `exp`, `ln`, `max`, `neg`, `sub`, `sum`, and
+`unsqueeze`) were each below `0.01 ms` at the logged checkpoints.
+
+| Step | conv2d (ms) | matmul (ms) | maximum (ms) | max_pool2d (ms) | add (ms) | mul (ms) |
+|---:|---:|---:|---:|---:|---:|---:|
+| 100 | 116.740917 | 24.312708 | 20.225875 | 4.471000 | 2.961167 | 0.607750 |
+| 200 | 121.605875 | 24.964500 | 26.282083 | 4.377416 | 4.901417 | 0.608334 |
+| 300 | 116.484958 | 24.917708 | 20.102375 | 4.073333 | 3.152708 | 0.534334 |
+| 400 | 116.212168 | 24.608416 | 20.011333 | 4.480125 | 2.651875 | 0.602375 |
+| 500 | 118.113375 | 24.328833 | 28.452792 | 4.049417 | 3.027500 | 0.557334 |
+| 600 | 115.883125 | 24.283792 | 19.891915 | 4.002042 | 2.461710 | 0.524875 |
+| 700 | 115.482584 | 24.368417 | 21.897584 | 4.245583 | 2.457708 | 0.560916 |
+| 800 | 115.303292 | 24.327458 | 20.598542 | 4.235625 | 2.467918 | 0.610875 |
+| 900 | 115.367750 | 24.319500 | 19.838666 | 4.016000 | 2.791292 | 0.555708 |
+| 938 | 57.642249 | 12.235792 | 10.257000 | 1.935750 | 1.221668 | 0.203792 |
+
+### Conv2 backward section profile
+
+The first convolution entry is the later, larger convolution in reverse graph
+order. Values are milliseconds.
+
+| Step | Total | Pack grad_output | Pack weight | Padded input | grad_weight | grad_input | Unpack weight |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 100 | 107.290708 | 1.995584 | 0.015666 | 2.160000 | 51.245084 | 51.457083 | 0.018083 |
+| 200 | 112.029333 | 6.247292 | 0.022291 | 2.847000 | 51.050458 | 51.162917 | 0.017167 |
+| 300 | 106.887667 | 1.905167 | 0.016708 | 2.096750 | 51.189916 | 51.353667 | 0.016834 |
+| 400 | 106.715834 | 1.862833 | 0.016750 | 2.031458 | 51.474917 | 51.311167 | 0.014666 |
+| 500 | 108.584709 | 2.274084 | 0.019792 | 2.491333 | 51.661083 | 51.325000 | 0.013917 |
+| 600 | 106.392125 | 1.922000 | 0.016250 | 2.008583 | 51.073000 | 51.164000 | 0.014250 |
+| 700 | 106.008542 | 1.807250 | 0.023334 | 2.016833 | 50.895333 | 51.096166 | 0.023208 |
+| 800 | 105.841875 | 1.789542 | 0.015834 | 1.977834 | 50.740541 | 51.133167 | 0.023959 |
+| 900 | 105.962459 | 1.954709 | 0.015708 | 2.069833 | 50.732333 | 51.004625 | 0.012958 |
+| 938 | 52.616791 | 0.830625 | 0.016000 | 0.914125 | 25.411417 | 25.418000 | 0.022250 |
+
+### Conv1 backward section profile
+
+| Step | Total | Pack grad_output | Pack weight | Padded input | grad_weight | grad_input | Unpack weight |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 100 | 9.450209 | 3.260958 | 0.001083 | 0.235667 | 2.544541 | 3.251084 | 0.000500 |
+| 200 | 9.576542 | 3.304584 | 0.001625 | 0.289542 | 2.555000 | 3.242708 | 0.000458 |
+| 300 | 9.597291 | 3.405542 | 0.000792 | 0.232125 | 2.534792 | 3.247333 | 0.000666 |
+| 400 | 9.496334 | 3.311084 | 0.001416 | 0.232542 | 2.550541 | 3.236375 | 0.001083 |
+| 500 | 9.528666 | 3.290750 | 0.001041 | 0.236292 | 2.532000 | 3.261625 | 0.000334 |
+| 600 | 9.491000 | 3.263709 | 0.001584 | 0.254917 | 2.550833 | 3.257666 | 0.000958 |
+| 700 | 9.474042 | 3.270875 | 0.000916 | 0.253500 | 2.541708 | 3.247333 | 0.000792 |
+| 800 | 9.461417 | 3.241125 | 0.000875 | 0.257750 | 2.532000 | 3.249041 | 0.000750 |
+| 900 | 9.405291 | 3.225542 | 0.000791 | 0.237000 | 2.522417 | 3.248875 | 0.000375 |
+| 938 | 5.025458 | 1.812208 | 0.001042 | 0.124541 | 1.268125 | 1.614292 | 0.000625 |
+
+### Epoch 1 completion
+
+| Metric | Value |
+|---|---:|
+| Training time | 234.81543525 s |
+| Smoothed training loss | 0.3363628374274767 |
+| Validation loss | 0.2691631467284183 |
+| Validation time | 10.455207417 s |
+
+### Stage 7 comparison
+
+Both runs are profiled, so unlike the Stage 6 comparison this is a clean
+like-for-like difference with no instrumentation mismatch.
+
+| Metric | Stage 7 | Stage 8 | Difference |
+|---|---:|---:|---:|
+| Initial evaluation | 13.369879042 s | 10.484789333 s | −2.885089709 s (−21.6%) |
+| Epoch 1 training | 267.85608725 s | 234.81543525 s | −33.040652 s (−12.3%) |
+| Validation time | 13.462407916 s | 10.455207417 s | −3.007200499 s (−22.3%) |
+
+### Operation-level comparison
+
+Median over the nine full-batch checkpoints, steps 100–900. Rows marked
+*control* are code paths this change did not touch, and act as a check on
+run-to-run drift.
+
+| Operation | Stage 7 | Stage 8 | Difference |
+|---|---:|---:|---:|
+| Conv2 forward | 59.152791 ms | 41.645917 ms | **−29.6%** |
+| Conv1 forward | 11.376416 ms | 9.283375 ms | **−18.4%** |
+| Conv2 `grad_input` | 65.060750 ms | 51.164000 ms | **−21.4%** |
+| Conv1 `grad_input` | 4.578042 ms | 3.248875 ms | **−29.0%** |
+| Conv2 `grad_weight` | 51.179458 ms | 51.073000 ms | −0.2% *(control)* |
+| Conv1 `grad_weight` | 2.509667 ms | 2.541708 ms | +1.3% *(control)* |
+| `matmul` backward | 24.613042 ms | 24.328833 ms | −1.1% *(control)* |
+| `linear1` forward | 3.579625 ms | 3.568000 ms | −0.3% *(control)* |
+| `maximum` | 20.362167 ms | 20.225875 ms | −0.7% *(control)* |
+| Conv2 `pack grad_output` | 1.924416 ms | 1.922000 ms | −0.1% *(control)* |
+| Conv2 `padded input` | 2.063958 ms | 2.069833 ms | +0.3% *(control)* |
+| `pool1` | 8.311750 ms | 7.353208 ms | −11.5% |
+| `max_pool2d` | 4.127792 ms | 4.235625 ms | +2.6% *(noise)* |
+| `add` | 2.537499 ms | 2.791292 ms | +10.0% *(noise)* |
+
+### Optimization review
+
+- **Better:** Conv2 forward improved `29.6%` and Conv2 `grad_input` `21.4%`,
+  taking the convolution forward pass from `59.15` to `41.65 ms` and the
+  Conv2 backward total from `120.33` to `106.72 ms`. Epoch-1 training fell by
+  `33.040652 s` against a profiled Stage 7, and validation by `3.007200499 s`.
+  Conv1, which shares the same kernels, improved `18.4%` forward and `29.0%` on
+  `grad_input` for free. Every *control* row is within 1.3% of its Stage 7 value,
+  which confirms the change was isolated.
+- **Worse:** The predicted gain did not materialise. The memory-operation model
+  predicted `grad_input` would roughly halve; it fell `21.4%`. The register tile
+  worked as designed in the disassembly, so the residual is in the loop's
+  non-memory costs: two bounds-check branches and a stack reload of the tile
+  length remain in the inner loop, and the nested block/tap order recomputes tap
+  addresses eight times per output position. `pool1` and `relu1` improved
+  `11.5%` and `3.6%` without being touched, most likely reduced memory pressure
+  from the cheaper convolution loops; `add` and `max_pool2d` moved within noise.
+- **Unchanged:** Despite the structural reassociation in `grad_input`, whose
+  reduction over output channels is now a sum of eight-element block partials,
+  the smoothed training loss and validation loss are **bit-identical to all
+  eight prior profiles**. The reassociated sums evidently produce the same
+  doubles for this data, so the bit-identity check remains usable. `grad_weight`
+  is unchanged by construction and confirms at `−0.2%`.
+
 ## Observations and next measurements
 
 - The first-epoch training loss and validation loss remain bit-identical across
-  all eight profiles, so no change has altered the observed training trajectory.
-- Stage 7 is a profiled run. A clean `make run-release` measurement is still
-  needed to bring the unprofiled baseline up to date; the profiled figure is
-  not directly comparable to the Stage 6 clean row.
+  all nine profiles, including across the Stage 8 reassociation, so no change
+  has altered the observed training trajectory.
+- Both Stages 7 and 8 are profiled runs, so their difference is clean. A clean
+  `make run-release` measurement is still needed to bring the unprofiled
+  baseline up to date; the profiled figure is not directly comparable to the
+  Stage 6 clean row.
 - The dot-product matmul path remains scalar. LLVM will not vectorize a
   floating-point reduction without `reassoc`, and Rust does not set it, so that
   path gained contiguous access and lost its accumulator traffic but gained no
   SIMD. Fixing it needs a two-dimensional register tile with `k` innermost, which
   is a larger change than the two unit-stride paths used here.
-- The next optimization target returns to Conv2 `grad_input` at `65.060750 ms`.
-  Disassembly of the release binary shows it is load-port bound with 50–67% of
-  its memory traffic spent reloading the output-channel accumulator once per
-  kernel tap, and the fix is a fixed-size stack tile with the tap loop innermost.
-- `maximum` is stable at `20.362167 ms` across many profiles and has never been
-  targeted. It is the third-largest backward category after Conv2 and matmul.
+- Conv2 `grad_weight` is now the largest single convolution section at
+  `51.073000 ms`, level with `grad_input` at `51.164000 ms`. Register blocking
+  does not apply to it, because its accumulator is rewritten once per output
+  position and must survive the position loop. It is already L2-resident at
+  `144 KiB`. The candidate approaches are a two-dimensional tile over channels
+  and positions, or a loop interchange to shorten the reuse distance.
+- `maximum` is stable at `20.225875 ms` across many profiles and has never been
+  targeted. It is the third-largest backward category after Conv2 and matmul,
+  and the largest code path in the model never examined.
+- Predictions from the load-port memory model have now been wrong twice: the
+  Stage 7 matmul rewrite delivered `1.7×` against a predicted `3×`, and the
+  Stage 8 conv tiling delivered `1.27×` on `grad_input` against a predicted `2×`.
+  Arithmetic-intensity models on this machine are useful for ruling a change
+  *out*, not for sizing it. Treat future estimates as optimistic by roughly a
+  factor of two.
 - Future profiles should record CPU model, commit, dtype, and thread settings
   before making claims that require cross-machine or PyTorch comparisons.
 - Do not extrapolate from individual checkpoints, especially step `938/938`;
@@ -769,7 +969,7 @@ section profile, which is the most recent comparable profiled run.
 
 ## Historical PyTorch reference
 
-The following reference is kept separately from the eight Rust profiles above.
+The following reference is kept separately from the nine Rust profiles above.
 
 | Metric | Value |
 |---|---:|
